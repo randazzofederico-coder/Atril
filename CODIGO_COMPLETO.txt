@@ -1,0 +1,5878 @@
+--- PROJECT STRUCTURE ---
+./
+    analysis_options.yaml
+    ARCHITECTURE.md
+    pubspec.yaml
+    README.md
+    lib/
+        main.dart
+        data/
+            app_data.dart
+            app_database.dart
+            backup_manager.dart
+            library_storage.dart
+            repositories/
+                annotation_repository.dart
+                import_repository.dart
+                library_repository.dart
+                setlist_repository.dart
+        models/
+            annotation_stroke.dart
+            app_data_types.dart
+            folder.dart
+            score.dart
+            setlist.dart
+            setlist_nav_context.dart
+        screens/
+            home_shell.dart
+            library/
+                folder_picker_screen.dart
+                library_actions.dart
+                library_screen.dart
+            reader/
+                annotation_layer.dart
+                live_setlist_screen.dart
+                pdf_viewer_screen.dart
+            setlists/
+                add_to_setlist_screen.dart
+                create_setlist_screen.dart
+                setlists_screen.dart
+                setlist_detail_screen.dart
+            settings/
+                settings_screen.dart
+        widgets/
+            folder_creation_dialog.dart
+            import_progress_dialog.dart
+            import_status_bar.dart
+            library_breadcrumbs.dart
+            library_browser_selector.dart
+            scoped_search_delegate.dart
+            score_import_logic.dart
+            swipe_detector_layer.dart
+-------------------------
+
+
+
+--- START FILE: .\analysis_options.yaml ---
+# This file configures the analyzer, which statically analyzes Dart code to
+# check for errors, warnings, and lints.
+#
+# The issues identified by the analyzer are surfaced in the UI of Dart-enabled
+# IDEs (https://dart.dev/tools#ides-and-editors). The analyzer can also be
+# invoked from the command line by running `flutter analyze`.
+
+# The following line activates a set of recommended lints for Flutter apps,
+# packages, and plugins designed to encourage good coding practices.
+include: package:flutter_lints/flutter.yaml
+
+linter:
+  # The lint rules applied to this project can be customized in the
+  # section below to disable rules from the `package:flutter_lints/flutter.yaml`
+  # included above or to enable additional rules. A list of all available lints
+  # and their documentation is published at https://dart.dev/lints.
+  #
+  # Instead of disabling a lint rule for the entire project in the
+  # section below, it can also be suppressed for a single line of code
+  # or a specific dart file by using the `// ignore: name_of_lint` and
+  # `// ignore_for_file: name_of_lint` syntax on the line or in the file
+  # producing the lint.
+  rules:
+    # avoid_print: false  # Uncomment to disable the `avoid_print` rule
+    # prefer_single_quotes: true  # Uncomment to enable the `prefer_single_quotes` rule
+
+# Additional information about this file can be found at
+# https://dart.dev/guides/language/analysis-options
+
+--- END FILE: .\analysis_options.yaml ---
+
+
+--- START FILE: .\ARCHITECTURE.md ---
+# ARCHITECTURE.md — Atril Digital (Flutter)
+
+**Estado del Proyecto:** Canon — **v1.9.0 (Metadata & Structure Polish)**
+**Prioridad Actual:** [UX] Setlists & Modo Vivo.
+**Fecha última actualización:** Enero 2026
+
+---
+
+## 1. Filosofía Central (Prime Directive)
+
+**"Seguridad en el Escenario"**
+La estabilidad es innegociable.
+* **Robustez:** Preferimos código aburrido, probado y modular.
+* **Feedback:** El usuario nunca debe adivinar si la app se colgó o si una acción terminó.
+
+---
+
+## 2. Arquitectura General
+
+* **Core:** Flutter (Material 3).
+* **Persistencia:** `drift` (SQLite) + `LibraryStorage` (FS local).
+* **Organización de Código (Refactor v1.9.0):**
+    * `data/repositories/`: Lógica de negocio pura (DB + Storage).
+    * `screens/<feature>/`: Pantallas agrupadas por dominio (library, setlists, reader).
+* **Lógica y Datos:** Patrón **Fachada (Facade)**.
+    * **`AppData`:** Orquestador de Estado Global y Caché en Memoria.
+    * **Repositorios:** `LibraryRepository`, `SetlistRepository`, `ImportRepository`, `AnnotationRepository`.
+
+### Nuevos Patrones de UI
+* **Actions Delegates:** `LibraryActions` maneja la lógica de diálogos (renombrar, borrar, mover), separándola del `build` de la pantalla.
+* **Visual Context:** Uso de elementos deshabilitados ("fantasmas") para dar contexto en selectores de movimiento.
+
+---
+
+## 3. Definiciones de UI y Navegación
+
+### 3.1. Estándar de AppBar (Library)
+* **Zona Izquierda:** Root ("Biblioteca") o Back + Breadcrumbs (Indicador de ruta).
+* **Zona Derecha:** Search, Import (+), New Folder, Settings.
+
+### 3.2. Modos de Interacción
+* **Modo Edición (3 Puntos):** Acciones individuales (Renombrar, Editar Autor, Detalles).
+* **Modo Selección (Mantener apretado):** Acciones en masa (Mover, Borrar, Crear Setlist).
+* **Modo Picker (FolderPicker):** Muestra partituras grisadas para contexto, pero solo permite seleccionar carpetas.
+
+---
+
+## 4. Log de Sesiones
+
+### Sesión Actual (v1.9.0 - Metadata & Folder Structure)
+**Objetivo:** Limpieza visual del proyecto y enriquecimiento de datos.
+* **Estructura:** Reorganización masiva de archivos en carpetas semánticas (`data/repositories`, `screens/library`, etc.).
+* **Feature:** Implementación de edición de **Título y Autor** (Metadata) en base de datos y UI.
+* **UX:** Mejoras en `FolderPickerScreen` mostrando archivos grisados (disabled) para dar contexto al mover items.
+* **Fix:** Implementación faltante de `renameFolder` en `LibraryActions`.
+
+### Sesión Previa (v1.8.0 - AppData Purity Refactor)
+* **Refactor:** `AppData` transformado en orquestador puro; lógica movida a Repositorios.
+* **Refactor:** `LibraryRepository` absorbió utilidades de PDF.
+
+---
+
+## 5. Roadmap / Próximos Pasos
+
+1.  **[UX] Experiencia Setlist y Modo Vivo (Prioridad Alta):**
+    * Revisar el flujo de uso en el escenario.
+    * Mejorar la transición entre temas y la visibilidad de controles.
+
+2.  **[Fix/Redesign] Sistema de Backup:**
+    * *Investigación:* El sistema actual de Import/Export (.atril ZIP) presenta fallos.
+    * *Propuesta:* Debuggear o imaginar una alternativa más robusta (ej: exportación plana de carpetas o sincronización).
+
+3.  **[Feature] Configuraciones de UI:**
+    * **Modo Nocturno:** Toggle para invertir colores en la interfaz (no en el PDF).
+    * **Escala de UI:** Opción para agrandar textos/botones (accesibilidad en escenario).
+
+4.  **[UX] Breadcrumbs Inteligentes:**
+    * Manejo de rutas largas en la barra superior.
+    * Implementar truncado visual: `Biblioteca / ... / Autores / Bach`.
+
+5.  **[Feature] Zoom y Pan en Anotaciones:**
+    * Mejorar la capa de dibujo para soportar zoom mientras se edita (actualmente bloquea gestos).
+--- END FILE: .\ARCHITECTURE.md ---
+
+
+--- START FILE: .\pubspec.yaml ---
+name: pdf_setlist
+description: "Gestor de partituras PDF."
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # Archivos y Permisos (Versiones Modernas)
+  file_picker: ^10.3.0
+  path: ^1.9.0
+  permission_handler: ^11.3.0
+  path_provider: ^2.1.2
+
+  archive: ^3.6.1
+  share_plus: ^10.0.0
+  intl: ^0.19.0
+
+  # PDF (Versiones Modernas)
+  pdfx: ^2.6.0
+  # ACTUALIZADO: Saltamos de la v24 a la v32 para arreglar el error de compilación
+  syncfusion_flutter_pdfviewer: ^32.1.24
+  
+  # Base de datos
+  drift: ^2.16.0
+  drift_flutter: ^0.1.0
+  sqlite3_flutter_libs: ^0.5.18
+
+  # UI
+  cupertino_icons: ^1.0.6
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  drift_dev: ^2.16.0
+  build_runner: ^2.4.8
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true
+--- END FILE: .\pubspec.yaml ---
+
+
+--- START FILE: .\README.md ---
+# pdf_setlist
+
+A new Flutter project.
+
+## Getting Started
+
+This project is a starting point for a Flutter application.
+
+A few resources to get you started if this is your first Flutter project:
+
+- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
+- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+
+For help getting started with Flutter development, view the
+[online documentation](https://docs.flutter.dev/), which offers tutorials,
+samples, guidance on mobile development, and a full API reference.
+
+--- END FILE: .\README.md ---
+
+
+--- START FILE: .\lib\main.dart ---
+import 'package:flutter/material.dart';
+import 'screens/home_shell.dart';
+import 'data/app_data.dart';
+
+void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  runApp(const AtrilApp());
+}
+
+class AtrilApp extends StatelessWidget {
+  const AtrilApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<void>(
+      future: AppData.init(),
+      builder: (context, snapshot) {
+        // Minimal bootstrap UI. If init fails, surface it clearly.
+        if (snapshot.hasError) {
+          return MaterialApp(
+            debugShowCheckedModeBanner: false,
+            theme: ThemeData(useMaterial3: true),
+            home: Scaffold(
+              body: Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Text(
+                    'Error inicializando la app:\n\n${snapshot.error}',
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              ),
+            ),
+          );
+        }
+
+        if (snapshot.connectionState != ConnectionState.done) {
+          return MaterialApp(
+            debugShowCheckedModeBanner: false,
+            theme: ThemeData(useMaterial3: true),
+            home: const Scaffold(
+              body: Center(child: CircularProgressIndicator()),
+            ),
+          );
+        }
+
+        return MaterialApp(
+          title: 'Atril',
+          debugShowCheckedModeBanner: false,
+          theme: ThemeData(
+            useMaterial3: true,
+          ),
+          home: const HomeShell(),
+        );
+      },
+    );
+  }
+}
+
+--- END FILE: .\lib\main.dart ---
+
+
+--- START FILE: .\lib\data\app_data.dart ---
+import 'dart:async';
+import 'package:flutter/foundation.dart';
+import '../models/score.dart';
+import '../models/setlist.dart';
+import '../models/folder.dart';
+import '../models/annotation_stroke.dart';
+import 'app_database.dart';
+import 'library_storage.dart';
+
+// --- REPOSITORIOS (FACHADA) ---
+// Exportamos para que las pantallas no necesiten cambiar sus imports
+import 'repositories/import_repository.dart';
+export 'repositories/import_repository.dart';
+
+import 'repositories/setlist_repository.dart';
+export 'repositories/setlist_repository.dart';
+
+import 'repositories/library_repository.dart';
+export 'repositories/library_repository.dart';
+
+import 'repositories/annotation_repository.dart'; // <--- Nuevo export
+export 'repositories/annotation_repository.dart';
+
+class AppData {
+  static AppDatabase db = AppDatabase();
+  static final LibraryStorage storage = LibraryStorage.instance;
+
+  static Future<void>? _initFuture;
+  
+  // Estado Reactivo
+  static final ValueNotifier<ImportState> importState = ValueNotifier(const ImportState());
+  static final ValueNotifier<int> libraryRevision = ValueNotifier<int>(0);
+  static final ValueNotifier<int> setlistsRevision = ValueNotifier<int>(0);
+
+  // Cache en Memoria (Source of Truth para la UI)
+  static final List<Score> library = <Score>[];
+  static final List<Folder> folders = <Folder>[];
+  static final List<Setlist> setlists = <Setlist>[];
+  
+  // Indices privados para acceso O(1)
+  static final Map<String, Score> _scoresById = <String, Score>{};
+  static final Map<String, Folder> _foldersById = <String, Folder>{};
+  static final Map<String, Setlist> _setlistsById = <String, Setlist>{};
+
+  // Cache de Ordenamiento
+  static int _cachedLibrarySortedRevision = -1;
+  static List<Score>? _cachedLibrarySorted;
+
+  // --- CICLO DE VIDA ---
+
+  static Future<void> init({bool forceReopen = false}) {
+    if (forceReopen) {
+      db = AppDatabase();
+      _initFuture = null;
+    }
+    return _initFuture ??= _initInternal();
+  }
+
+  static Future<void> closeDbForRestore() async {
+    await db.close();
+    await Future.delayed(const Duration(milliseconds: 500));
+  }
+
+  static Future<void> _initInternal() async {
+    await storage.init();
+    await refreshLibrary();
+  }
+
+  static Future<void> refreshLibrary() async {
+    await _hydrateAll();
+  }
+
+  /// Carga todo desde la DB a la memoria RAM.
+  static Future<void> _hydrateAll() async {
+    // 1. Folders
+    final dbFolders = await db.getAllFolders();
+    folders.clear();
+    _foldersById.clear();
+    for (final f in dbFolders) {
+      if (f.id == 'root') continue;
+      final folder = Folder(
+        id: f.id,
+        name: f.name,
+        parentId: f.parentId,
+        position: f.position,
+      );
+      folders.add(folder);
+      _foldersById[folder.id] = folder;
+    }
+
+    // 2. Docs
+    final docs = await db.getAllDocs();
+    library.clear();
+    _scoresById.clear();
+
+    for (final d in docs) {
+      final absPath = storage.absPathFromRelPath(d.internalRelPath);
+      final score = Score(
+        docId: d.id,
+        title: d.displayName,
+        author: d.author ?? '',
+        filePath: absPath,
+        folderId: d.folderId ?? 'root',
+      );
+      library.add(score);
+      _scoresById[score.docId] = score;
+    }
+
+    // 3. Setlists
+    final sls = await db.getAllSetlists();
+    setlists.clear();
+    _setlistsById.clear();
+
+    for (final s in sls) {
+      final items = await db.getItemsForSetlist(s.id);
+      final docIds = items
+          .map((e) => e.docId)
+          .where((id) => id.isNotEmpty)
+          .toList(growable: true);
+      final setlist = Setlist(setlistId: s.id, name: s.name, docIds: docIds);
+      setlists.add(setlist);
+      _setlistsById[setlist.setlistId] = setlist;
+    }
+
+    _notifyLibrary();
+    _notifySetlists();
+  }
+
+  static void _notifyLibrary() => libraryRevision.value++;
+  static void _notifySetlists() => setlistsRevision.value++;
+
+  // --- ID GENERATORS ---
+  static int _seq = 0;
+  static String newId({String prefix = 'id'}) {
+    _seq += 1;
+    return '${prefix}_${DateTime.now().microsecondsSinceEpoch}_$_seq';
+  }
+  static String newDocId() => newId(prefix: 'd');
+  static String newSetlistId() => newId(prefix: 's');
+  static String newFolderId() => newId(prefix: 'f');
+
+  // ===========================================================================
+  // SELECTORS & CACHE ACCESS (UI HELPERS)
+  // ===========================================================================
+
+  static Folder? getFolderById(String id) => _foldersById[id];
+  static Score? getScoreById(String id) => _scoresById[id];
+  static Setlist? getSetlistById(String id) => _setlistsById[id];
+
+  static List<Score> getLibrarySortedByTitle() {
+    final rev = libraryRevision.value;
+    if (_cachedLibrarySorted != null && _cachedLibrarySortedRevision == rev) {
+      return _cachedLibrarySorted!;
+    }
+    final sorted = List<Score>.from(library)
+      ..sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
+    
+    _cachedLibrarySorted = sorted;
+    _cachedLibrarySortedRevision = rev;
+    return sorted;
+  }
+
+  static List<Score> materializeSetlist(Setlist s) {
+    final out = <Score>[];
+    for (final id in s.docIds) {
+      final sc = _scoresById[id];
+      if (sc != null) out.add(sc);
+    }
+    return out;
+  }
+
+  // ===========================================================================
+  // ACTION DELEGATES (FACHADA)
+  // Redireccionan a los Repositorios correspondientes.
+  // ===========================================================================
+
+  // --- LIBRARY REPOSITORY ---
+  static Future<String> createFolder({required String name, required String parentId, bool refresh = true}) =>
+      LibraryRepository.createFolder(name: name, parentId: parentId, refresh: refresh);
+  
+  static Future<void> updateScoreMetadata(String docId, String newTitle, String newAuthor) =>
+      LibraryRepository.updateScoreMetadata(docId: docId, newTitle: newTitle, newAuthor: newAuthor);
+
+  static Future<void> renameScore(String docId, String newTitle) =>
+      LibraryRepository.renameScore(docId, newTitle);
+    
+  static Future<void> renameFolder(String folderId, String newName) =>
+      LibraryRepository.renameFolder(folderId, newName);
+  
+  static Future<void> moveItems({required List<String> docIds, required List<String> folderIds, required String targetParentId}) =>
+      LibraryRepository.moveItems(docIds: docIds, folderIds: folderIds, targetParentId: targetParentId);
+  
+  static Future<void> deleteItems({required List<String> docIds, required List<String> folderIds}) =>
+      LibraryRepository.deleteItems(docIds: docIds, folderIds: folderIds);
+  
+  static Future<void> deleteScore(String docId, {bool refresh = true}) =>
+      LibraryRepository.deleteScore(docId, refresh: refresh);
+  
+  static String uniqueTitle(String desiredTitle) => 
+      LibraryRepository.uniqueTitle(desiredTitle);
+
+  static Set<String> getRecursiveFolderIds(String startFolderId) =>
+      LibraryRepository.getRecursiveFolderIds(startFolderId);
+
+  static List<String> getFlatDocIdsFromOrderedSelection(List<String> mixedIds) =>
+      LibraryRepository.getFlatDocIdsFromOrderedSelection(mixedIds);
+
+  // --- IMPORT REPOSITORY ---
+  static Future<Score> importPdfFromExternalPath({required String sourcePath, required String desiredTitle, String author = '', String targetFolderId = 'root', bool refresh = true}) =>
+      ImportRepository.importPdfFromExternalPath(sourcePath: sourcePath, desiredTitle: desiredTitle, author: author, targetFolderId: targetFolderId, refresh: refresh);
+
+  static Future<void> importBatchBackground(List<String> filePaths, String targetFolderId) => 
+      ImportRepository.importBatchBackground(filePaths, targetFolderId);
+  
+  static Stream<ImportStatus> importBatchStream(List<String> filePaths, String targetFolderId) => 
+      ImportRepository.importBatchStream(filePaths, targetFolderId);
+  
+  static Stream<ImportStatus> importFolderStream(String path, String targetParentId) => 
+      ImportRepository.importFolderStream(path, targetParentId);
+
+  // --- SETLIST REPOSITORY ---
+  static String uniqueSetlistName(String desiredName) => SetlistRepository.uniqueSetlistName(desiredName);
+  
+  static Future<void> addSetlist(Setlist setlist) async { 
+    await SetlistRepository.addSetlist(setlist);
+    await refreshLibrary(); 
+  }
+  
+  static Future<void> deleteSetlist(String setlistId) async { 
+    await SetlistRepository.deleteSetlist(setlistId); 
+    await refreshLibrary();
+  }
+  
+  static Future<void> addDocsToSetlist(String setlistId, List<String> newIds) async { 
+    await SetlistRepository.addDocsToSetlist(setlistId, newIds); 
+    _notifySetlists();
+  }
+  
+  static Future<void> reorderDocInSetlist(String setlistId, int oldIdx, int newIdx) async { 
+    await SetlistRepository.reorderDocInSetlist(setlistId, oldIdx, newIdx); 
+    _notifySetlists();
+  }
+  
+  static Future<void> removeDocFromSetlist(String setlistId, String docId) async { 
+    await SetlistRepository.removeDocFromSetlist(setlistId, docId); 
+    _notifySetlists();
+  }
+
+  // --- ANNOTATION REPOSITORY ---
+  static Future<List<AnnotationStroke>> getAnnotationStrokesForPage({required String docId, required int pageIndex, String? setlistId}) =>
+      AnnotationRepository.getAnnotationStrokesForPage(docId: docId, pageIndex: pageIndex, setlistId: setlistId);
+
+  static Future<void> insertAnnotationStroke(AnnotationStroke s) =>
+      AnnotationRepository.insertAnnotationStroke(s);
+
+  static Future<void> deleteAnnotationStroke(String id) =>
+      AnnotationRepository.deleteAnnotationStroke(id);
+
+  static Future<void> deleteAnnotationStrokesForPage({required String docId, required int pageIndex, String? setlistId}) =>
+      AnnotationRepository.deleteAnnotationStrokesForPage(docId: docId, pageIndex: pageIndex, setlistId: setlistId);
+
+  // --- PDF UTILS (Delegated to LibraryRepository) ---
+  static Future<int> getPagesCountForPath(String path) => LibraryRepository.getPagesCountForPath(path);
+  static int getLastPageForDocId(String docId) => LibraryRepository.getLastPageForDocId(docId);
+  static void setLastPageForDocId(String docId, int page) => LibraryRepository.setLastPageForDocId(docId, page);
+}
+--- END FILE: .\lib\data\app_data.dart ---
+
+
+--- START FILE: .\lib\data\app_database.dart ---
+import 'dart:io';
+import 'package:drift/drift.dart';
+import 'package:drift/native.dart'; // Importante para NativeDatabase
+import 'package:path_provider/path_provider.dart';
+import 'package:path/path.dart' as p;
+
+part 'app_database.g.dart';
+
+// -----------------------------------------------------------------------------
+// Drift schema (v2)
+// -----------------------------------------------------------------------------
+
+class DocsTable extends Table {
+  TextColumn get id => text()(); // docId
+  TextColumn get displayName => text()();
+  TextColumn get author => text().nullable()();
+  TextColumn get internalRelPath => text()();
+  TextColumn get folderId => text().nullable().references(FoldersTable, #id)();
+
+  IntColumn get createdAt => integer()();
+  IntColumn get updatedAt => integer()();
+  @override
+  Set<Column<Object>> get primaryKey => {id};
+}
+
+class FoldersTable extends Table {
+  TextColumn get id => text()();
+  TextColumn get parentId => text().nullable().references(FoldersTable, #id)();
+  TextColumn get name => text()();
+  IntColumn get position => integer()();
+
+  IntColumn get createdAt => integer()();
+  IntColumn get updatedAt => integer()();
+  @override
+  Set<Column<Object>> get primaryKey => {id};
+}
+
+class SetlistsTable extends Table {
+  TextColumn get id => text()();
+  TextColumn get name => text()();
+  TextColumn get notes => text().nullable()();
+
+  IntColumn get createdAt => integer()();
+  IntColumn get updatedAt => integer()();
+
+  @override
+  Set<Column<Object>> get primaryKey => {id};
+}
+
+class SetlistItemsTable extends Table {
+  TextColumn get setlistId => text().references(SetlistsTable, #id)();
+  TextColumn get docId => text().references(DocsTable, #id)();
+  IntColumn get position => integer()();
+
+  @override
+  Set<Column<Object>> get primaryKey => {setlistId, docId};
+}
+
+class DocStateTable extends Table {
+  TextColumn get docId => text().references(DocsTable, #id)();
+  IntColumn get lastPage => integer()();
+  IntColumn get updatedAt => integer()();
+
+  @override
+  Set<Column<Object>>? get primaryKey => {docId};
+}
+
+// --- APERTURA DE CONEXIÓN EXPLÍCITA ---
+LazyDatabase _openConnection() {
+  return LazyDatabase(() async {
+    // Aquí definimos explícitamente que la DB viva en la carpeta de Documentos
+    // para que coincida con donde la busca el BackupManager.
+    final dbFolder = await getApplicationDocumentsDirectory();
+    final file = File(p.join(dbFolder.path, 'atril.sqlite'));
+    return NativeDatabase.createInBackground(file);
+  });
+}
+
+@DriftDatabase(
+  tables: [DocsTable, SetlistsTable, SetlistItemsTable, DocStateTable, FoldersTable],
+)
+class AppDatabase extends _$AppDatabase {
+  // CAMBIO: Usamos _openConnection en lugar de driftDatabase(...)
+  AppDatabase() : super(_openConnection());
+
+  @override
+  int get schemaVersion => 2;
+
+  static const String _annotationsTableName = 'annotation_strokes';
+  
+  @override
+  MigrationStrategy get migration => MigrationStrategy(
+        onCreate: (Migrator m) async {
+          await m.createAll();
+          await _createAnnotationsTableIfNeeded();
+          await _ensureRootFolderExists();
+        },
+        onUpgrade: (Migrator m, int from, int to) async {
+          if (from < 2) {
+            await m.createTable(foldersTable);
+            await _ensureRootFolderExists();
+            await customStatement("UPDATE docs_table SET folder_id = 'root' WHERE folder_id IS NULL");
+          }
+          await _createAnnotationsTableIfNeeded();
+        },
+        beforeOpen: (details) async {
+          await customStatement('PRAGMA foreign_keys = ON');
+          await _createAnnotationsTableIfNeeded();
+        },
+      );
+
+  Future<void> _createAnnotationsTableIfNeeded() async {
+    await customStatement('''
+      CREATE TABLE IF NOT EXISTS $_annotationsTableName (
+        id TEXT PRIMARY KEY,
+        doc_id TEXT NOT NULL,
+        setlist_id TEXT NULL,
+        page_index INTEGER NOT NULL,
+        tool TEXT NOT NULL,
+        width REAL NOT NULL,
+        points_json TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+    ''');
+    await customStatement('''
+      CREATE INDEX IF NOT EXISTS idx_${_annotationsTableName}_doc_page_layer
+      ON $_annotationsTableName(doc_id, page_index, setlist_id);
+    ''');
+  }
+
+  Future<void> _ensureRootFolderExists() async {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    await customStatement(
+      "INSERT OR IGNORE INTO folders_table (id, parent_id, name, position, created_at, updated_at) VALUES ('root', NULL, 'Biblioteca', 0, ?, ?)",
+      [now, now],
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Docs
+  // ---------------------------------------------------------------------------
+
+  Future<List<DocsTableData>> getAllDocs() {
+    return (select(docsTable)..orderBy([(t) => OrderingTerm.asc(t.displayName)])).get();
+  }
+
+  Future<void> upsertDoc({
+    required String id,
+    required String displayName,
+    required String author,
+    required String internalRelPath,
+    String? folderId,
+  }) async {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    await into(docsTable).insertOnConflictUpdate(
+      DocsTableCompanion.insert(
+        id: id,
+        displayName: displayName,
+        author: Value(author),
+        internalRelPath: internalRelPath,
+        folderId: Value(folderId ?? 'root'),
+        createdAt: now,
+        updatedAt: now,
+      ),
+    );
+  }
+
+  Future<void> deleteDocById(String docId) async {
+    await (delete(docsTable)..where((t) => t.id.equals(docId))).go();
+  }
+
+  Future<void> deleteDocStateByDocId(String docId) async {
+    await (delete(docStateTable)..where((t) => t.docId.equals(docId))).go();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Folders
+  // ---------------------------------------------------------------------------
+
+  Future<List<FoldersTableData>> getAllFolders() {
+    return (select(foldersTable)..orderBy([(t) => OrderingTerm.asc(t.position)])).get();
+  }
+
+  Future<void> upsertFolder({
+    required String id,
+    required String name,
+    String? parentId,
+    required int position,
+  }) async {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    await into(foldersTable).insertOnConflictUpdate(
+      FoldersTableCompanion.insert(
+        id: id,
+        name: name,
+        parentId: Value(parentId),
+        position: position,
+        createdAt: now,
+        updatedAt: now,
+      ),
+    );
+  }
+
+  Future<void> createFolder({
+    required String id,
+    required String name,
+    String? parentId,
+    int position = 0,
+  }) async {
+    return upsertFolder(
+      id: id,
+      name: name,
+      parentId: parentId,
+      position: position,
+    );
+  }
+
+  Future<void> deleteFolder(String folderId) async {
+    await (delete(foldersTable)..where((t) => t.id.equals(folderId))).go();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Setlists
+  // ---------------------------------------------------------------------------
+
+  Future<List<SetlistsTableData>> getAllSetlists() {
+    return (select(setlistsTable)..orderBy([(t) => OrderingTerm.asc(t.name)])).get();
+  }
+
+  Future<void> upsertSetlist({
+    required String id,
+    required String name,
+    String? notes,
+  }) async {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    await into(setlistsTable).insertOnConflictUpdate(
+      SetlistsTableCompanion.insert(
+        id: id,
+        name: name,
+        notes: Value(notes),
+        createdAt: now,
+        updatedAt: now,
+      ),
+    );
+  }
+
+  Future<void> deleteSetlistById(String setlistId) async {
+    await transaction(() async {
+      await (delete(setlistItemsTable)..where((t) => t.setlistId.equals(setlistId))).go();
+      await (delete(setlistsTable)..where((t) => t.id.equals(setlistId))).go();
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Setlist items
+  // ---------------------------------------------------------------------------
+
+  Future<List<SetlistItemsTableData>> getItemsForSetlist(String setlistId) {
+    return (select(setlistItemsTable)
+          ..where((t) => t.setlistId.equals(setlistId))
+          ..orderBy([(t) => OrderingTerm.asc(t.position)]))
+        .get();
+  }
+
+  Future<void> replaceSetlistItems({
+    required String setlistId,
+    required List<String> orderedDocIds,
+  }) async {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    await transaction(() async {
+      await (delete(setlistItemsTable)..where((t) => t.setlistId.equals(setlistId))).go();
+
+      var pos = 0;
+      for (final docId in orderedDocIds) {
+        if (docId.isEmpty) continue;
+
+        await into(setlistItemsTable).insert(
+          SetlistItemsTableCompanion.insert(
+            setlistId: setlistId,
+            docId: docId,
+            position: pos,
+          ),
+        );
+        pos++;
+      }
+      await (update(setlistsTable)..where((t) => t.id.equals(setlistId))).write(
+        SetlistsTableCompanion(updatedAt: Value(now)),
+      );
+    });
+  }
+
+  Future<void> deleteSetlistItemsByDocId(String docId) async {
+    await (delete(setlistItemsTable)..where((t) => t.docId.equals(docId))).go();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Annotations
+  // ---------------------------------------------------------------------------
+
+  Future<List<Map<String, Object?>>> getAnnotationStrokeRows({
+    required String docId,
+    required int pageIndex,
+    String? setlistId,
+  }) async {
+    if (setlistId == null) {
+      final rowsNull = await customSelect(
+        '''
+        SELECT id, doc_id, setlist_id, page_index, tool, width, points_json, created_at
+        FROM $_annotationsTableName
+        WHERE doc_id = ? AND page_index = ? AND setlist_id IS NULL
+        ORDER BY created_at ASC
+        ''',
+        variables: [Variable.withString(docId), Variable.withInt(pageIndex)],
+      ).get();
+      return rowsNull.map((r) => r.data).toList(growable: false);
+    }
+    final rowsEq = await customSelect(
+      '''
+      SELECT id, doc_id, setlist_id, page_index, tool, width, points_json, created_at
+      FROM $_annotationsTableName
+      WHERE doc_id = ? AND page_index = ? AND setlist_id = ?
+      ORDER BY created_at ASC
+      ''',
+      variables: [
+        Variable.withString(docId),
+        Variable.withInt(pageIndex),
+        Variable.withString(setlistId)
+      ],
+    ).get();
+    return rowsEq.map((r) => r.data).toList(growable: false);
+  }
+
+  Future<void> insertAnnotationStrokeRow(Map<String, Object?> row) async {
+    final setlistId = row['setlist_id'] as String?;
+    final List<Variable<Object>> args = [
+      Variable.withString(row['id'] as String),
+      Variable.withString(row['doc_id'] as String),
+      if (setlistId == null) ...[] else Variable.withString(setlistId),
+      Variable.withInt(row['page_index'] as int),
+      Variable.withString(row['tool'] as String),
+      Variable.withReal((row['width'] as num).toDouble()),
+      Variable.withString(row['points_json'] as String),
+      Variable.withInt(row['created_at'] as int),
+    ];
+    if (setlistId == null) {
+      await customInsert(
+        '''
+        INSERT OR REPLACE INTO $_annotationsTableName
+        (id, doc_id, setlist_id, page_index, tool, width, points_json, created_at)
+        VALUES (?, ?, NULL, ?, ?, ?, ?, ?)
+        ''',
+        variables: args,
+      );
+    } else {
+      await customInsert(
+        '''
+        INSERT OR REPLACE INTO $_annotationsTableName
+        (id, doc_id, setlist_id, page_index, tool, width, points_json, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ''',
+        variables: args,
+      );
+    }
+  }
+
+  Future<void> deleteAnnotationStrokeById(String id) async {
+    await customStatement('DELETE FROM $_annotationsTableName WHERE id = ?', [id]);
+  }
+
+  Future<void> deleteAnnotationStrokesForPage({
+    required String docId,
+    required int pageIndex,
+    String? setlistId,
+  }) async {
+    if (setlistId == null) {
+      await customStatement(
+        'DELETE FROM $_annotationsTableName WHERE doc_id = ? AND page_index = ? AND setlist_id IS NULL',
+        [docId, pageIndex],
+      );
+    } else {
+      await customStatement(
+        'DELETE FROM $_annotationsTableName WHERE doc_id = ? AND page_index = ? AND setlist_id = ?',
+        [docId, pageIndex, setlistId],
+      );
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Doc state
+  // ---------------------------------------------------------------------------
+
+  Future<void> upsertLastPage({required String docId, required int lastPage}) async {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    await into(docStateTable).insertOnConflictUpdate(
+      DocStateTableCompanion.insert(
+        docId: docId,
+        lastPage: (lastPage < 1 ? 1 : lastPage),
+        updatedAt: now,
+      ),
+    );
+  }
+}
+--- END FILE: .\lib\data\app_database.dart ---
+
+
+--- START FILE: .\lib\data\backup_manager.dart ---
+import 'dart:io';
+import 'package:archive/archive_io.dart';
+import 'package:flutter/foundation.dart';
+import 'package:intl/intl.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
+// Eliminado: import 'package:file_picker/file_picker.dart'; 
+
+import 'app_data.dart';
+
+class BackupManager {
+  BackupManager._();
+
+  static final BackupManager instance = BackupManager._();
+
+  /// Genera un archivo .atril (ZIP) con la DB y los PDFs y lanza el diálogo de compartir/guardar.
+  Future<void> createBackup() async {
+    try {
+      final appDir = await getApplicationDocumentsDirectory();
+      final dbFile = File(p.join(appDir.path, 'atril.sqlite'));
+      final docsDir = Directory(p.join(appDir.path, 'atril', 'docs'));
+
+      // 1. Preparar Encoder
+      final archive = Archive();
+
+      // 2. Agregar DB
+      if (await dbFile.exists()) {
+        final dbBytes = await dbFile.readAsBytes();
+        archive.addFile(ArchiveFile('atril.sqlite', dbBytes.lengthInBytes, dbBytes));
+      } else {
+        throw Exception("No se encontró la base de datos.");
+      }
+
+      // 3. Agregar PDFs
+      if (await docsDir.exists()) {
+        final files = docsDir.listSync(recursive: true);
+        for (final file in files) {
+          if (file is File) {
+            final filename = p.relative(file.path, from: docsDir.path);
+            final bytes = await file.readAsBytes();
+            archive.addFile(ArchiveFile('docs/$filename', bytes.lengthInBytes, bytes));
+          }
+        }
+      }
+
+      // 4. Comprimir
+      final zipEncoder = ZipEncoder();
+      final encodedZip = zipEncoder.encode(archive);
+
+      if (encodedZip == null) throw Exception("Error codificando el backup.");
+
+      // 5. Guardar archivo temporal
+      final timestamp = DateFormat('yyyyMMdd_HHmm').format(DateTime.now());
+      final fileName = 'backup_atril_$timestamp.atril';
+      
+      final tempDir = await getTemporaryDirectory();
+      final tempFile = File(p.join(tempDir.path, fileName));
+      
+      await tempFile.writeAsBytes(encodedZip);
+
+      // 6. Exportar
+      await Share.shareXFiles([XFile(tempFile.path)], text: 'Backup de Atril Digital');
+
+    } catch (e) {
+      debugPrint('Error creando backup: $e');
+      rethrow;
+    }
+  }
+
+  /// Restaura un archivo .atril reemplazando la data actual.
+  /// ¡DESTRUCTIVO!
+  Future<void> restoreBackup(String sourcePath) async {
+    final appDir = await getApplicationDocumentsDirectory();
+    final dbFile = File(p.join(appDir.path, 'atril.sqlite'));
+    final docsDir = Directory(p.join(appDir.path, 'atril', 'docs'));
+    final shmFile = File(p.join(appDir.path, 'atril.sqlite-shm'));
+    final walFile = File(p.join(appDir.path, 'atril.sqlite-wal'));
+
+    // 1. Validar ZIP
+    final bytes = await File(sourcePath).readAsBytes();
+    final archive = ZipDecoder().decodeBytes(bytes);
+
+    bool hasDb = archive.any((f) => f.name == 'atril.sqlite');
+    if (!hasDb) throw Exception("El archivo no es un backup válido de Atril (falta DB).");
+
+    // 2. CERRAR DB ACTUAL (Crítico)
+    await AppData.closeDbForRestore();
+
+    try {
+      // 3. Limpiar estado actual (Wipe)
+      if (await dbFile.exists()) await dbFile.delete();
+      if (await shmFile.exists()) await shmFile.delete();
+      if (await walFile.exists()) await walFile.delete();
+      
+      if (await docsDir.exists()) {
+        await docsDir.delete(recursive: true);
+      }
+      await docsDir.create(recursive: true);
+
+      // 4. Extraer
+      for (final file in archive) {
+        if (file.isFile) {
+          if (file.name == 'atril.sqlite') {
+            await dbFile.writeAsBytes(file.content as List<int>);
+          } else if (file.name.startsWith('docs/')) {
+            final relPath = file.name.replaceFirst('docs/', '');
+            if (relPath.isEmpty) continue;
+            
+            final destFile = File(p.join(docsDir.path, relPath));
+            await destFile.create(recursive: true);
+            await destFile.writeAsBytes(file.content as List<int>);
+          }
+        }
+      }
+
+      // 5. Reinicializar
+      await AppData.init(forceReopen: true);
+
+    } catch (e) {
+      debugPrint("Error fatal en restore: $e");
+      rethrow;
+    }
+  }
+}
+--- END FILE: .\lib\data\backup_manager.dart ---
+
+
+--- START FILE: .\lib\data\library_storage.dart ---
+import 'dart:io';
+import 'package:flutter/foundation.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
+
+/// Handles internal file storage for the Library.
+///
+/// Core rule: PDFs live inside app-controlled storage (not external URIs).
+/// DB rows store only the *relative* path, e.g. `docs/<docId>.pdf`.
+class LibraryStorage {
+  LibraryStorage._();
+  static final LibraryStorage instance = LibraryStorage._();
+
+  Directory? _baseDir;
+  Directory? _docsDir;
+
+  Directory get baseDir {
+    final d = _baseDir;
+    if (d == null) throw StateError('LibraryStorage not initialized');
+    return d;
+  }
+
+  /// Initializes (and creates if needed) the internal folders.
+  Future<void> init() async {
+    final appDir = await getApplicationDocumentsDirectory();
+    final base = Directory(p.join(appDir.path, 'atril'));
+    final docs = Directory(p.join(base.path, 'docs'));
+
+    if (!await base.exists()) {
+      await base.create(recursive: true);
+    }
+    if (!await docs.exists()) {
+      await docs.create(recursive: true);
+    }
+
+    _baseDir = base;
+    _docsDir = docs;
+  }
+
+  String docRelPath(String docId) => p.join('docs', '$docId.pdf');
+
+  String docAbsPath(String docId) {
+    final docs = _docsDir;
+    if (docs == null) {
+      throw StateError('LibraryStorage not initialized');
+    }
+    return p.join(docs.path, '$docId.pdf');
+  }
+
+  /// Resolves a DB-stored relative path (e.g. `docs/<id>.pdf`) into an
+  /// absolute path within internal storage.
+  String absPathFromRelPath(String relPath) {
+    return p.join(baseDir.path, relPath);
+  }
+
+  /// Copies an existing PDF file into internal storage.
+  /// Returns the *relative* path to persist in the DB.
+  Future<String> importPdfFromExternalPath({
+    required String sourcePath,
+    required String docId,
+  }) async {
+    final destPath = docAbsPath(docId);
+    final src = File(sourcePath);
+    
+    if (!await src.exists()) {
+      throw FileSystemException('No existe el archivo fuente', sourcePath);
+    }
+
+    // Write to temp then rename (atomic within same directory).
+    final tmpPath = '$destPath.tmp';
+    final tmp = File(tmpPath);
+    if (await tmp.exists()) {
+      await tmp.delete();
+    }
+
+    try {
+      // Intento 1: Copia nativa (rápida)
+      await src.copy(tmpPath);
+    } catch (e) {
+      debugPrint('Warning: File.copy failed ($e). Trying manual byte stream copy...');
+      // Intento 2: Copia manual por streams (más robusta en Scoped Storage)
+      try {
+        final inStream = src.openRead();
+        final outSink = tmp.openWrite();
+        await inStream.pipe(outSink); // pipe cierra el sink automáticamente
+      } catch (e2) {
+         debugPrint('Error: Manual stream copy failed too: $e2');
+         // Limpiamos si quedó algo corrupto
+         if (await tmp.exists()) await tmp.delete();
+         rethrow;
+      }
+    }
+
+    await tmp.rename(destPath);
+
+    return docRelPath(docId);
+  }
+
+  /// NUEVO: Guardar un PDF desde Bytes en memoria (Usado para importación SAF).
+  Future<String> savePdfFromBytes({
+    required Uint8List bytes,
+    required String docId,
+  }) async {
+    final destPath = docAbsPath(docId);
+    final file = File(destPath);
+    
+    // Si ya existe algo con ese ID (raro porque el ID es nuevo), limpiamos
+    if (await file.exists()) {
+      await file.delete();
+    }
+
+    await file.writeAsBytes(bytes, flush: true);
+    return docRelPath(docId);
+  }
+
+  Future<void> deleteDocFile(String docId) async {
+    final f = File(docAbsPath(docId));
+    if (await f.exists()) {
+      await f.delete();
+    }
+  }
+
+  Future<String> duplicateDocFile({
+    required String sourceDocId,
+    required String newDocId,
+  }) async {
+    final src = File(docAbsPath(sourceDocId));
+    if (!await src.exists()) {
+      throw FileSystemException('No existe el archivo fuente', src.path);
+    }
+
+    final destPath = docAbsPath(newDocId);
+    final tmpPath = '$destPath.tmp';
+    await src.copy(tmpPath);
+    await File(tmpPath).rename(destPath);
+    return docRelPath(newDocId);
+  }
+}
+--- END FILE: .\lib\data\library_storage.dart ---
+
+
+--- START FILE: .\lib\data\repositories\annotation_repository.dart ---
+import '../../models/annotation_stroke.dart';
+import '../app_data.dart';
+
+class AnnotationRepository {
+  
+  static Future<List<AnnotationStroke>> getAnnotationStrokesForPage({
+    required String docId, 
+    required int pageIndex, 
+    String? setlistId
+  }) async {
+    final rows = await AppData.db.getAnnotationStrokeRows(
+      docId: docId, 
+      pageIndex: pageIndex, 
+      setlistId: setlistId
+    );
+    return rows.map(AnnotationStroke.fromDbMap).toList();
+  }
+
+  static Future<void> insertAnnotationStroke(AnnotationStroke s) async {
+    await AppData.db.insertAnnotationStrokeRow(s.toDbMap());
+  }
+
+  static Future<void> deleteAnnotationStroke(String id) async {
+    await AppData.db.deleteAnnotationStrokeById(id);
+  }
+
+  static Future<void> deleteAnnotationStrokesForPage({
+    required String docId, 
+    required int pageIndex, 
+    String? setlistId
+  }) async {
+    await AppData.db.deleteAnnotationStrokesForPage(
+      docId: docId, 
+      pageIndex: pageIndex, 
+      setlistId: setlistId
+    );
+  }
+}
+--- END FILE: .\lib\data\repositories\annotation_repository.dart ---
+
+
+--- START FILE: .\lib\data\repositories\import_repository.dart ---
+import 'dart:async';
+import 'dart:io';
+
+import 'package:flutter/foundation.dart';
+import 'package:path/path.dart' as p;
+import '../../models/score.dart';
+import '../app_data.dart';
+// Eliminado: import 'library_repository.dart'; <- Ya viene incluido dentro de app_data.dart
+
+// --- CLASES Y ENUMS ---
+
+/// Define las fases de la importación para la UI
+enum ImportStage { idle, picking, processing, finishing }
+
+/// Estado para notificar a la barra de progreso
+class ImportState {
+  final ImportStage stage;
+  final int total;
+  final int current;
+  final String currentItemName;
+
+  const ImportState({
+    this.stage = ImportStage.idle,
+    this.total = 0,
+    this.current = 0,
+    this.currentItemName = '',
+  });
+
+  bool get isActive => stage != ImportStage.idle;
+
+  double? get progress => (total > 0 && stage == ImportStage.processing)
+      ? current / total
+      : null;
+}
+
+/// DTO legacy para reportar el progreso
+class ImportStatus {
+  final int count;
+  final String currentFile;
+  final bool completed;
+
+  const ImportStatus({
+    required this.count,
+    required this.currentFile,
+    this.completed = false,
+  });
+}
+
+// --- CLASE REPOSITORIO ---
+
+class ImportRepository {
+  
+  // Helpers privados para actualizar el estado en AppData
+  static void _updateState({
+    required ImportStage stage,
+    int total = 0,
+    int current = 0,
+    String name = '',
+  }) {
+    AppData.importState.value = ImportState(
+      stage: stage,
+      total: total,
+      current: current,
+      currentItemName: name,
+    );
+  }
+
+  /// Lógica CORE movida desde AppData.
+  /// Importa un único PDF desde una ruta externa al almacenamiento interno y DB.
+  static Future<Score> importPdfFromExternalPath({
+    required String sourcePath,
+    required String desiredTitle,
+    String author = '',
+    String targetFolderId = 'root',
+    bool refresh = true,
+  }) async {
+    // 1. Validar unicidad de título (Logica de Negocio)
+    // Accedemos a LibraryRepository a través del export de AppData
+    final title = LibraryRepository.uniqueTitle(desiredTitle);
+    
+    // 2. Generar ID y Persistir archivo (Logica de Storage)
+    final docId = AppData.newDocId();
+    final relPath = await AppData.storage.importPdfFromExternalPath(
+      sourcePath: sourcePath,
+      docId: docId,
+    );
+
+    // 3. Guardar en Base de Datos (Logica de DB)
+    await AppData.db.upsertDoc(
+      id: docId,
+      displayName: title,
+      author: author,
+      internalRelPath: relPath,
+      folderId: targetFolderId,
+    );
+
+    // 4. Actualizar Estado (State Management)
+    if (refresh) await AppData.refreshLibrary();
+    
+    // Si no refrescamos (ej: batch import), devolvemos el objeto construido manualmente
+    if (!refresh) {
+       return Score(
+         docId: docId, 
+         title: title, 
+         author: author, 
+         filePath: AppData.storage.absPathFromRelPath(relPath), 
+         folderId: targetFolderId
+       );
+    }
+    
+    // Si refrescamos, lo buscamos en el cache actualizado
+    return AppData.getScoreById(docId)!;
+  }
+
+  /// Procesa una lista de rutas sin bloquear y actualiza AppData.importState.
+  static Future<void> importBatchBackground(List<String> filePaths, String targetFolderId) async {
+    final total = filePaths.length;
+    int current = 0;
+
+    // Estado inicial: Procesando 0/Total
+    _updateState(stage: ImportStage.processing, total: total, current: 0);
+
+    for (final path in filePaths) {
+      try {
+        final fileName = p.basename(path).replaceAll('.pdf', '');
+        
+        // Actualizamos UI: Procesando nombre...
+        _updateState(
+          stage: ImportStage.processing,
+          total: total,
+          current: current + 1,
+          name: fileName,
+        );
+
+        await importPdfFromExternalPath(
+          sourcePath: path,
+          desiredTitle: fileName,
+          targetFolderId: targetFolderId,
+          refresh: false, // No refrescamos la UI entera por cada archivo
+        );
+
+        current++;
+        // Delay mínimo para no bloquear el UI thread
+        await Future.delayed(Duration.zero);
+      } catch (e) {
+        debugPrint("Error importando $path: $e");
+      }
+    }
+
+    // Refrescar DB y UI global
+    _updateState(stage: ImportStage.finishing, name: 'Actualizando biblioteca...');
+    await AppData.refreshLibrary();
+
+    // Reset a estado inactivo
+    _updateState(stage: ImportStage.idle);
+  }
+
+  /// Método Stream para ImportProgressDialog
+  static Stream<ImportStatus> importBatchStream(List<String> filePaths, String targetFolderId) async* {
+    int current = 0;
+    for (final path in filePaths) {
+      final fileName = p.basename(path).replaceAll('.pdf', '');
+      yield ImportStatus(count: current, currentFile: fileName);
+
+      try {
+        await importPdfFromExternalPath(
+          sourcePath: path,
+          desiredTitle: fileName,
+          targetFolderId: targetFolderId,
+          refresh: false,
+        );
+        current++;
+        await Future.delayed(Duration.zero);
+      } catch (e) {
+        debugPrint("Error importando $path: $e");
+      }
+      yield ImportStatus(count: current, currentFile: fileName);
+    }
+
+    // Refresco final
+    await AppData.refreshLibrary();
+    yield ImportStatus(count: current, currentFile: 'Finalizado', completed: true);
+  }
+
+  /// Método Recursivo (Legacy) para carpetas completas
+  static Stream<ImportStatus> importFolderStream(String path, String targetParentId) async* {
+    int totalImported = 0;
+    await for (final count in _importFolderStreamRecursive(path, targetParentId)) {
+      totalImported += count;
+      yield ImportStatus(
+        count: totalImported,
+        currentFile: 'Procesando...',
+      );
+    }
+    await AppData.refreshLibrary();
+    yield ImportStatus(count: totalImported, currentFile: 'Finalizado', completed: true);
+  }
+
+  static Stream<int> _importFolderStreamRecursive(
+    String path,
+    String targetParentId,
+  ) async* {
+    final dir = Directory(path);
+    try {
+      if (!await dir.exists()) return;
+    } catch (e) {
+      debugPrint("Error verificando directorio: $e");
+      return;
+    }
+
+    final folderName = p.basename(dir.path);
+    // Crea la carpeta lógica usando AppData
+    final newFolderId = await AppData.createFolder(
+      name: folderName,
+      parentId: targetParentId,
+      refresh: false,
+    );
+
+    try {
+      final entities = dir.listSync(recursive: false);
+      for (final entity in entities) {
+        try {
+          bool isFile = (entity is File);
+          if (!isFile && FileSystemEntity.typeSync(entity.path) == FileSystemEntityType.file) isFile = true;
+
+          if (isFile) {
+            if (entity.path.toLowerCase().endsWith('.pdf')) {
+              final fileName = p.basename(entity.path).replaceAll('.pdf', '');
+              
+              await importPdfFromExternalPath(
+                sourcePath: entity.path,
+                desiredTitle: fileName,
+                targetFolderId: newFolderId,
+                refresh: false,
+              );
+              
+              yield 1; // Contamos 1 archivo
+              await Future.delayed(Duration.zero);
+            }
+          } else if (entity is Directory) {
+            final name = p.basename(entity.path);
+            if (!name.startsWith('.')) {
+              yield* _importFolderStreamRecursive(entity.path, newFolderId);
+            }
+          }
+        } catch (e) {
+          debugPrint("Error importando ítem ${entity.path}: $e");
+        }
+      }
+    } catch (e) {
+      debugPrint("Error listando carpeta $path: $e");
+    }
+  }
+}
+--- END FILE: .\lib\data\repositories\import_repository.dart ---
+
+
+--- START FILE: .\lib\data\repositories\library_repository.dart ---
+import 'package:pdfx/pdfx.dart'; // Necesario para abrir el PDF y contar páginas
+import '../../models/setlist.dart';
+import '../app_data.dart';
+
+class LibraryRepository {
+  
+  // ---------------------------------------------------------------------------
+  // FOLDERS
+  // ---------------------------------------------------------------------------
+
+  static Future<String> createFolder({
+    required String name,
+    required String parentId,
+    bool refresh = true,
+  }) async {
+    final id = AppData.newFolderId();
+    // Calculamos posición basada en los folders actuales en memoria
+    final siblings = AppData.folders.where((f) => (f.parentId ?? 'root') == parentId).length;
+    
+    await AppData.db.createFolder(
+      id: id,
+      name: name,
+      parentId: parentId == 'root' ? null : parentId,
+      position: siblings,
+    );
+    
+    if (refresh) await AppData.refreshLibrary();
+    return id;
+  }
+
+  static Future<void> renameFolder(String folderId, String newName) async {
+    final f = AppData.getFolderById(folderId);
+    if (f == null) return;
+
+    await AppData.db.upsertFolder(
+      id: f.id,
+      name: newName,
+      parentId: f.parentId, // Mantenemos el mismo padre
+      position: f.position, // Mantenemos la misma posición
+    );
+    await AppData.refreshLibrary();
+  }
+
+  // Cambiamos la firma para aceptar (opcionalmente) un nuevo autor
+  static Future<void> updateScoreMetadata({
+    required String docId, 
+    required String newTitle, 
+    required String newAuthor
+  }) async {
+    final s = AppData.getScoreById(docId);
+    if (s == null) return;
+    
+    // Mantenemos el path relativo interno igual
+    final relPath = AppData.storage.docRelPath(s.docId);
+    
+    await AppData.db.upsertDoc(
+      id: s.docId,
+      displayName: newTitle, // Actualizamos Título
+      author: newAuthor,     // Actualizamos Autor
+      internalRelPath: relPath,
+      folderId: s.folderId,
+    );
+    await AppData.refreshLibrary();
+  }
+
+  // ---------------------------------------------------------------------------
+  // SCORES
+  // ---------------------------------------------------------------------------
+
+  static Future<void> renameScore(String docId, String newTitle) async {
+    final s = AppData.getScoreById(docId);
+    if (s == null) return;
+    
+    final relPath = AppData.storage.docRelPath(s.docId);
+    await AppData.db.upsertDoc(
+      id: s.docId,
+      displayName: newTitle,
+      author: s.author,
+      internalRelPath: relPath,
+      folderId: s.folderId,
+    );
+    await AppData.refreshLibrary();
+  }
+
+  static String uniqueTitle(String desiredTitle) {
+    final base = desiredTitle.trim();
+    if (base.isEmpty) return 'Sin Titulo';
+    
+    final exists = AppData.library.any((s) => s.title.toLowerCase() == base.toLowerCase());
+    if (!exists) return base;
+    
+    var n = 2;
+    while (true) {
+      final cand = '$base ($n)';
+      if (!AppData.library.any((s) => s.title.toLowerCase() == cand.toLowerCase())) return cand;
+      n++;
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // OPERACIONES EN LOTE (MOVIMIENTOS Y BORRADOS)
+  // ---------------------------------------------------------------------------
+
+  static Future<void> moveItems({
+    required List<String> docIds,
+    required List<String> folderIds,
+    required String targetParentId,
+  }) async {
+    // 1. Mover Docs
+    for (final docId in docIds) {
+      final doc = AppData.getScoreById(docId);
+      if (doc != null) {
+        await AppData.db.upsertDoc(
+          id: doc.docId,
+          displayName: doc.title,
+          author: doc.author,
+          internalRelPath: AppData.storage.docRelPath(doc.docId),
+          folderId: targetParentId,
+        );
+      }
+    }
+    // 2. Mover Folders
+    for (final folderId in folderIds) {
+      if (folderId == targetParentId) continue;
+      final f = AppData.getFolderById(folderId);
+      if (f != null) {
+        await AppData.db.upsertFolder(
+          id: f.id,
+          name: f.name,
+          position: f.position,
+          parentId: targetParentId == 'root' ? null : targetParentId,
+        );
+      }
+    }
+    await AppData.refreshLibrary();
+  }
+
+  static Future<void> deleteItems({
+    required List<String> docIds,
+    required List<String> folderIds,
+  }) async {
+    for (final id in docIds) {
+      await deleteScore(id, refresh: false);
+    }
+    for (final id in folderIds) {
+      await _deleteFolderRecursive(id);
+    }
+    await AppData.refreshLibrary();
+  }
+
+  static Future<void> _deleteFolderRecursive(String folderId) async {
+    // Borrar subcarpetas
+    final childrenF = AppData.folders.where((f) => f.parentId == folderId).toList();
+    for (final child in childrenF) {
+      await _deleteFolderRecursive(child.id);
+    }
+    // Borrar docs dentro
+    final childrenD = AppData.library.where((d) => d.folderId == folderId).toList();
+    for (final doc in childrenD) {
+      await deleteScore(doc.docId, refresh: false);
+    }
+    // Borrar la carpeta en sí
+    await AppData.db.deleteFolder(folderId);
+  }
+
+  static Future<void> deleteScore(String docId, {bool refresh = true}) async {
+    final score = AppData.getScoreById(docId);
+    if (score == null) return;
+
+    // 1. Limpiar referencias en Setlists
+    final changedSetlists = <Setlist>[];
+    for (final s in AppData.setlists) {
+      if (s.docIds.contains(docId)) {
+        s.docIds.removeWhere((id) => id == docId);
+        changedSetlists.add(s);
+      }
+    }
+
+    await AppData.db.deleteSetlistItemsByDocId(docId);
+    for (final s in changedSetlists) {
+      await AppData.db.replaceSetlistItems(setlistId: s.setlistId, orderedDocIds: s.docIds);
+    }
+
+    // 2. Borrar datos de la partitura
+    await AppData.db.deleteDocStateByDocId(docId);
+    await AppData.db.deleteDocById(docId);
+    await AppData.storage.deleteDocFile(docId);
+    if (refresh) await AppData.refreshLibrary();
+  }
+
+  // ---------------------------------------------------------------------------
+  // HELPERS DE RECURSIVIDAD Y BÚSQUEDA
+  // ---------------------------------------------------------------------------
+
+  static Set<String> getRecursiveFolderIds(String startFolderId) {
+    final Set<String> ids = {startFolderId};
+    final children = AppData.folders.where((f) => f.parentId == startFolderId);
+    for (final child in children) {
+      ids.addAll(getRecursiveFolderIds(child.id));
+    }
+    return ids;
+  }
+
+  static List<String> getFlatDocIdsFromOrderedSelection(List<String> mixedIds) {
+    final uniqueIds = <String>{};
+    for (final id in mixedIds) {
+      if (AppData.getScoreById(id) != null) {
+        uniqueIds.add(id);
+      } else if (AppData.getFolderById(id) != null) {
+        uniqueIds.addAll(_getDocsInFolderRecursive(id));
+      }
+    }
+    return uniqueIds.toList();
+  }
+
+  static List<String> _getDocsInFolderRecursive(String folderId) {
+    final out = <String>[];
+    // Docs directos
+    final directDocs = AppData.library.where((s) => s.folderId == folderId).toList()
+      ..sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
+    for (final d in directDocs) {
+      out.add(d.docId);
+    }
+    // Subcarpetas
+    final subFolders = AppData.folders.where((f) => f.parentId == folderId).toList()
+      ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    for (final sub in subFolders) {
+      out.addAll(_getDocsInFolderRecursive(sub.id));
+    }
+    return out;
+  }
+
+  // ---------------------------------------------------------------------------
+  // PDF STATE HELPERS (Movidos desde AppData)
+  // ---------------------------------------------------------------------------
+
+  // Cache en memoria para no abrir el PDF cada vez que scrolleamos
+  static final Map<String, int> _pagesCountCache = {};
+  static final Map<String, int> _lastPageCache = {};
+
+  static Future<int> getPagesCountForPath(String path) async {
+    if (_pagesCountCache.containsKey(path)) return _pagesCountCache[path]!;
+    try {
+      final doc = await PdfDocument.openFile(path);
+      final c = doc.pagesCount;
+      await doc.close(); // Importante cerrar
+      _pagesCountCache[path] = c;
+      return c;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  static int getLastPageForDocId(String docId) => _lastPageCache[docId] ?? 1;
+
+  static void setLastPageForDocId(String docId, int page) {
+    _lastPageCache[docId] = page;
+    // Fire and forget a la DB para no bloquear UI
+    AppData.db.upsertLastPage(docId: docId, lastPage: page);
+  }
+}
+--- END FILE: .\lib\data\repositories\library_repository.dart ---
+
+
+--- START FILE: .\lib\data\repositories\setlist_repository.dart ---
+import '../../models/setlist.dart';
+import '../app_data.dart'; // Necesario para acceder a AppData.db y AppData.setlists
+
+class SetlistRepository {
+  
+  /// Genera un nombre único para el setlist (ej: "Concierto (2)")
+  static String uniqueSetlistName(String desiredName) {
+    final base = desiredName.trim();
+    if (base.isEmpty) return 'Sin Nombre';
+    
+    // Accedemos a la lista actual en memoria para verificar duplicados
+    final exists = AppData.setlists.any((s) => s.name.toLowerCase() == base.toLowerCase());
+    if (!exists) return base;
+    
+    var n = 2;
+    while (true) {
+      final cand = '$base ($n)';
+      if (!AppData.setlists.any((s) => s.name.toLowerCase() == cand.toLowerCase())) return cand;
+      n++;
+    }
+  }
+
+  static Future<void> addSetlist(Setlist setlist) async {
+    await AppData.db.transaction(() async {
+      await AppData.db.upsertSetlist(id: setlist.setlistId, name: setlist.name);
+      await AppData.db.replaceSetlistItems(setlistId: setlist.setlistId, orderedDocIds: setlist.docIds);
+    });
+    // AppData se encargará de refrescar la UI después de llamar a esto
+  }
+
+  static Future<void> deleteSetlist(String setlistId) async {
+    await AppData.db.deleteSetlistById(setlistId);
+  }
+
+  static Future<void> addDocsToSetlist(String setlistId, List<String> newIds) async {
+    final s = AppData.getSetlistById(setlistId);
+    if (s == null) return;
+    
+    // Modificamos el objeto en memoria
+    s.docIds.addAll(newIds);
+    
+    // Persistimos en DB
+    await AppData.db.replaceSetlistItems(setlistId: setlistId, orderedDocIds: s.docIds);
+  }
+
+  static Future<void> reorderDocInSetlist(String setlistId, int oldIdx, int newIdx) async {
+    final s = AppData.getSetlistById(setlistId);
+    if (s == null) return;
+    
+    // Lógica de reordenamiento de lista
+    if (newIdx > oldIdx) newIdx -= 1;
+    final item = s.docIds.removeAt(oldIdx);
+    s.docIds.insert(newIdx, item);
+    
+    // Persistimos
+    await AppData.db.replaceSetlistItems(setlistId: setlistId, orderedDocIds: s.docIds);
+  }
+  
+  static Future<void> removeDocFromSetlist(String setlistId, String docId) async {
+    final s = AppData.getSetlistById(setlistId);
+    if (s == null) return;
+    
+    s.docIds.remove(docId);
+    await AppData.db.replaceSetlistItems(setlistId: setlistId, orderedDocIds: s.docIds);
+  }
+}
+--- END FILE: .\lib\data\repositories\setlist_repository.dart ---
+
+
+--- START FILE: .\lib\models\annotation_stroke.dart ---
+import 'dart:convert';
+import 'dart:ui';
+
+/// Basic non-destructive PDF annotation model.
+///
+/// Coordinates are stored NORMALIZED to the page viewport:
+/// - dx, dy in [0..1] relative to the rendered page area.
+/// This makes annotations stable across devices/resolutions.
+///
+/// Notes:
+/// - v1 supports only freehand strokes (pen/highlighter).
+/// - Future: setlist-specific layer by setting [setlistId] non-null.
+enum AnnotationTool {
+  pen,
+  highlighter,
+}
+
+class AnnotationStroke {
+  final String id;
+  final String docId;
+  final String? setlistId;
+  final int pageIndex; // 1-based, consistent with PdfViewPinch
+  final AnnotationTool tool;
+  final double width;
+  final List<Offset> pointsNorm; // normalized points [0..1]
+  final int createdAtMs;
+
+  const AnnotationStroke({
+    required this.id,
+    required this.docId,
+    required this.setlistId,
+    required this.pageIndex,
+    required this.tool,
+    required this.width,
+    required this.pointsNorm,
+    required this.createdAtMs,
+  });
+
+  String get toolName => tool.name;
+
+  static AnnotationTool toolFromName(String name) {
+    return AnnotationTool.values.firstWhere(
+      (t) => t.name == name,
+      orElse: () => AnnotationTool.pen,
+    );
+  }
+
+  Map<String, Object?> toDbMap() {
+    return {
+      'id': id,
+      'doc_id': docId,
+      'setlist_id': setlistId,
+      'page_index': pageIndex,
+      'tool': toolName,
+      'width': width,
+      'points_json': encodePoints(pointsNorm),
+      'created_at': createdAtMs,
+    };
+  }
+
+  static AnnotationStroke fromDbMap(Map<String, Object?> row) {
+    return AnnotationStroke(
+      id: row['id'] as String,
+      docId: row['doc_id'] as String,
+      setlistId: row['setlist_id'] as String?,
+      pageIndex: (row['page_index'] as int),
+      tool: toolFromName(row['tool'] as String),
+      width: (row['width'] as num).toDouble(),
+      pointsNorm: decodePoints(row['points_json'] as String),
+      createdAtMs: (row['created_at'] as int),
+    );
+  }
+
+  // ---------------- Serialization helpers ----------------
+
+  /// Encodes points as JSON: [[x,y], ...]
+  static String encodePoints(List<Offset> pts) {
+    final arr = pts.map((p) => [p.dx, p.dy]).toList(growable: false);
+    return jsonEncode(arr);
+  }
+
+  static List<Offset> decodePoints(String jsonStr) {
+    try {
+      final raw = jsonDecode(jsonStr);
+      if (raw is! List) return const <Offset>[];
+      final out = <Offset>[];
+      for (final e in raw) {
+        if (e is List && e.length >= 2) {
+          final dx = (e[0] as num).toDouble();
+          final dy = (e[1] as num).toDouble();
+          out.add(Offset(dx, dy));
+        }
+      }
+      return out;
+    } catch (_) {
+      return const <Offset>[];
+    }
+  }
+}
+
+--- END FILE: .\lib\models\annotation_stroke.dart ---
+
+
+--- START FILE: .\lib\models\app_data_types.dart ---
+enum FileSystemItemType { folder, file }
+
+class FileSystemItem {
+  final String id;
+  final String name;
+  final FileSystemItemType type;
+  final String path; // Ruta completa o relativa
+
+  FileSystemItem({
+    required this.id,
+    required this.name,
+    required this.type,
+    required this.path,
+  });
+
+  bool get isDirectory => type == FileSystemItemType.folder;
+}
+--- END FILE: .\lib\models\app_data_types.dart ---
+
+
+--- START FILE: .\lib\models\folder.dart ---
+class Folder {
+  final String id;
+  final String name;
+  final String? parentId; // null o 'root' (o el ID de la carpeta padre)
+  final int position;
+
+  const Folder({
+    required this.id,
+    required this.name,
+    required this.parentId,
+    required this.position,
+  });
+}
+--- END FILE: .\lib\models\folder.dart ---
+
+
+--- START FILE: .\lib\models\score.dart ---
+class Score {
+  /// Stable identifier for referencing this document across the app (and future DB).
+  final String docId;
+
+  /// Display metadata (editable in future).
+  final String title;
+  final String author;
+
+  /// Source PDF path (MVP). Future: internal storage path / uri.
+  final String? filePath;
+
+  /// Carpeta lógica donde se encuentra (filesystem tree).
+  /// Por defecto es 'root'.
+  final String folderId;
+
+  const Score({
+    required this.docId,
+    required this.title,
+    required this.author,
+    this.filePath,
+    this.folderId = 'root',
+  });
+}
+--- END FILE: .\lib\models\score.dart ---
+
+
+--- START FILE: .\lib\models\setlist.dart ---
+class Setlist {
+  /// Stable identifier for referencing this setlist across the app (and future DB).
+  final String setlistId;
+
+  /// Display name.
+  final String name;
+
+  /// Ordered list of docIds (order is the order).
+  final List<String> docIds;
+
+  const Setlist({
+    required this.setlistId,
+    required this.name,
+    required this.docIds,
+  });
+}
+
+--- END FILE: .\lib\models\setlist.dart ---
+
+
+--- START FILE: .\lib\models\setlist_nav_context.dart ---
+class SetlistNavContext {
+  final String setlistId;
+  final int index; // 0-based
+  final int total;
+
+  const SetlistNavContext({
+    required this.setlistId,
+    required this.index,
+    required this.total,
+  });
+}
+--- END FILE: .\lib\models\setlist_nav_context.dart ---
+
+
+--- START FILE: .\lib\screens\home_shell.dart ---
+import 'package:flutter/material.dart';
+
+import 'setlists/create_setlist_screen.dart';
+import 'library/library_screen.dart';
+import 'setlists/setlists_screen.dart';
+import 'settings/settings_screen.dart';
+
+class HomeShell extends StatefulWidget {
+  const HomeShell({super.key});
+
+  @override
+  State<HomeShell> createState() => _HomeShellState();
+}
+
+class _HomeShellState extends State<HomeShell> {
+  int _index = 0;
+  int _setlistsRevision = 0;
+
+  Future<void> _createSetlistFlow() async {
+    final created = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(builder: (_) => const CreateSetlistScreen()),
+    );
+    if (!mounted) return;
+    if (created == true) {
+      setState(() => _setlistsRevision++);
+    }
+  }
+
+  AppBar? _buildAppBar() {
+    if (_index == 0) {
+      return null;
+    }
+
+    return AppBar(
+      title: const Text('Setlists'),
+      centerTitle: false, 
+      actions: [
+        IconButton(
+          tooltip: 'Configuración',
+          icon: const Icon(Icons.settings),
+          onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen())),
+        ),
+        const SizedBox(width: 8),
+        IconButton(
+          tooltip: 'Crear setlist',
+          onPressed: _createSetlistFlow,
+          icon: const Icon(Icons.add),
+        ),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // CAMBIO IMPORTANTE:
+    // Usamos IndexedStack para mantener el estado de las pantallas vivo
+    // aunque no las estemos viendo.
+    final pages = [
+      const LibraryScreen(),
+      SetlistsScreen(key: ValueKey(_setlistsRevision)),
+    ];
+
+    return Scaffold(
+      appBar: _buildAppBar(),
+      // ANTES: body: pages[_index], 
+      // AHORA:
+      body: IndexedStack(
+        index: _index,
+        children: pages,
+      ),
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: _index,
+        onDestinationSelected: (i) => setState(() => _index = i),
+        destinations: const [
+          NavigationDestination(
+            icon: Icon(Icons.library_music),
+            label: 'Biblioteca',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.queue_music),
+            label: 'Setlists',
+          ),
+        ],
+      ),
+    );
+  }
+}
+--- END FILE: .\lib\screens\home_shell.dart ---
+
+
+--- START FILE: .\lib\screens\library\folder_picker_screen.dart ---
+import 'package:flutter/material.dart';
+import '../../data/app_data.dart';
+import '../../widgets/library_browser_selector.dart';
+import '../../widgets/folder_creation_dialog.dart';
+
+class FolderPickerScreen extends StatefulWidget {
+  /// IDs de las carpetas que se están moviendo.
+  /// Estas deben aparecer deshabilitadas para evitar mover una carpeta dentro de sí misma.
+  final List<String> ignoreFolderIds;
+  
+  /// Título de la acción (ej: "Mover 3 items")
+  final String actionTitle;
+
+  const FolderPickerScreen({
+    super.key,
+    required this.ignoreFolderIds,
+    this.actionTitle = 'Mover items',
+  });
+
+  @override
+  State<FolderPickerScreen> createState() => _FolderPickerScreenState();
+}
+
+class _FolderPickerScreenState extends State<FolderPickerScreen> {
+  String _currentFolderId = 'root';
+  late final Set<String> _ignoredIdsSet;
+
+  @override
+  void initState() {
+    super.initState();
+    _ignoredIdsSet = widget.ignoreFolderIds.toSet();
+  }
+
+  void _enterFolder(String folderId) {
+    setState(() => _currentFolderId = folderId);
+  }
+
+  void _navigateUp() {
+    if (_currentFolderId == 'root') return;
+    
+    final current = AppData.getFolderById(_currentFolderId);
+    setState(() {
+      _currentFolderId = current?.parentId ?? 'root';
+    });
+  }
+
+  void _confirmSelection() {
+    // Retornamos el ID de la carpeta que el usuario está viendo actualmente
+    Navigator.of(context).pop(_currentFolderId);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bool isRoot = _currentFolderId == 'root';
+    
+    // Título dinámico
+    String title = widget.actionTitle;
+    if (!isRoot) {
+      final f = AppData.getFolderById(_currentFolderId);
+      title = f?.name ?? 'Carpeta';
+    }
+
+    return PopScope(
+      canPop: isRoot,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        _navigateUp();
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          leading: isRoot 
+            ? const CloseButton() 
+            : IconButton(
+                icon: const Icon(Icons.arrow_back), 
+                onPressed: _navigateUp
+              ),
+          title: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(title, style: const TextStyle(fontSize: 18)),
+              if (!isRoot)
+                const Text(
+                  'Toca "Mover aquí" para confirmar',
+                  style: TextStyle(fontSize: 12, color: Colors.grey),
+                ),
+            ],
+          ),
+          actions: [
+            // Botón para crear nueva carpeta en el destino (muy útil al organizar)
+            IconButton(
+              tooltip: 'Nueva carpeta',
+              icon: const Icon(Icons.create_new_folder_outlined),
+              onPressed: () {
+                showDialog(
+                  context: context,
+                  builder: (_) => FolderCreationDialog(parentId: _currentFolderId),
+                );
+              },
+            ),
+            const SizedBox(width: 8),
+            // Acción principal
+            FilledButton(
+              onPressed: _confirmSelection,
+              style: FilledButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+              ),
+              child: const Text('Mover aquí'),
+            ),
+            const SizedBox(width: 12),
+          ],
+        ),
+        body: LibraryBrowserSelector(
+          currentFolderId: _currentFolderId,
+          onFolderTap: _enterFolder,
+          onDocTap: null, // No aplica
+          
+          showScores: true, // <--- CLAVE: Ocultar partituras
+          scoresDisabled: true,
+          
+          // No necesitamos modo selección, solo navegación.
+          isSelectionMode: false,
+          
+          disabledItemIds: _ignoredIdsSet, // Bloquea entrada a las carpetas origen
+        ),
+      ),
+    );
+  }
+}
+--- END FILE: .\lib\screens\library\folder_picker_screen.dart ---
+
+
+--- START FILE: .\lib\screens\library\library_actions.dart ---
+import 'package:flutter/material.dart';
+import '../../data/app_data.dart';
+import '../../models/setlist.dart';
+import '../../widgets/score_import_logic.dart';
+import 'folder_picker_screen.dart';
+
+/// Clase utilitaria estática para manejar las acciones de negocio de la Biblioteca.
+/// Esto descarga de responsabilidad a la pantalla principal (UI).
+class LibraryActions {
+
+  // ---------------------------------------------------------------------------
+  // IMPORTACIÓN
+  // ---------------------------------------------------------------------------
+  
+  static void showImportOptions(BuildContext context, String currentFolderId) {
+    showDialog(
+      context: context,
+      builder: (ctx) => SimpleDialog(
+        title: const Text('Importar'),
+        children: [
+          SimpleDialogOption(
+            onPressed: () {
+              Navigator.pop(ctx);
+              ScoreImportLogic.pickAndImportFiles(context, currentFolderId);
+            },
+            child: const Padding(
+              padding: EdgeInsets.symmetric(vertical: 8.0),
+              child: Row(
+                children: [
+                  Icon(Icons.description, color: Colors.blueGrey),
+                  SizedBox(width: 12),
+                  Text('Archivos PDF'),
+                ],
+              ),
+            ),
+          ),
+          SimpleDialogOption(
+            onPressed: () {
+              Navigator.pop(ctx);
+              ScoreImportLogic.pickAndImportFolder(context, currentFolderId);
+            },
+            child: const Padding(
+              padding: EdgeInsets.symmetric(vertical: 8.0),
+              child: Row(
+                children: [
+                  Icon(Icons.folder, color: Colors.amber),
+                  SizedBox(width: 12),
+                  Text('Carpeta completa'),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // GESTIÓN DE CARPETAS (CRUD)
+  // ---------------------------------------------------------------------------
+
+  static Future<void> editScoreMetadata(BuildContext context, String docId) async {
+    final doc = AppData.getScoreById(docId);
+    if (doc == null) return;
+    
+    final titleCtrl = TextEditingController(text: doc.title);
+    final authorCtrl = TextEditingController(text: doc.author);
+
+    // Usamos un Form simple dentro del diálogo
+    final changed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Editar datos'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: titleCtrl,
+              autofocus: true,
+              textCapitalization: TextCapitalization.sentences,
+              decoration: const InputDecoration(
+                labelText: 'Título',
+                icon: Icon(Icons.title),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: authorCtrl,
+              textCapitalization: TextCapitalization.words,
+              decoration: const InputDecoration(
+                labelText: 'Compositor / Autor',
+                icon: Icon(Icons.person),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false), 
+            child: const Text('Cancelar')
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true), 
+            child: const Text('Guardar')
+          ),
+        ],
+      ),
+    );
+
+    if (changed == true) {
+       final newTitle = titleCtrl.text.trim();
+       // Si el usuario borra el título, usamos "Sin Título" por seguridad
+       final finalTitle = newTitle.isEmpty ? 'Sin Título' : newTitle;
+       final finalAuthor = authorCtrl.text.trim();
+
+       // Llamamos a la nueva función de AppData
+       await AppData.updateScoreMetadata(docId, finalTitle, finalAuthor);
+    }
+  }
+
+  static Future<void> renameFolder(BuildContext context, String folderId) async {
+    final folder = AppData.getFolderById(folderId);
+    if (folder == null) return;
+    
+    final controller = TextEditingController(text: folder.name);
+
+    final newName = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Renombrar carpeta'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          textCapitalization: TextCapitalization.sentences,
+          decoration: const InputDecoration(hintText: 'Nuevo nombre'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx), 
+            child: const Text('Cancelar')
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, controller.text), 
+            child: const Text('Renombrar')
+          ),
+        ],
+      ),
+    );
+
+    if (newName != null && newName.trim().isNotEmpty) {
+       await AppData.renameFolder(folderId, newName.trim());
+    }
+  }
+
+  static Future<void> deleteFolderSingle(BuildContext context, String folderId) async {
+    final folder = AppData.getFolderById(folderId);
+    if (folder == null) return;
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Eliminar carpeta'),
+        content: Text('¿Eliminar "${folder.name}" y TODO su contenido?\nEsta acción no se puede deshacer.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(ctx, true), 
+            child: const Text('Eliminar')
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      await AppData.deleteItems(docIds: [], folderIds: [folderId]);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Carpeta eliminada')));
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // GESTIÓN DE SCORES (CRUD)
+  // ---------------------------------------------------------------------------
+
+  static Future<void> renameScore(BuildContext context, String docId) async {
+    final doc = AppData.getScoreById(docId);
+    if (doc == null) return;
+    
+    final controller = TextEditingController(text: doc.title);
+    final newName = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Renombrar archivo'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          textCapitalization: TextCapitalization.sentences,
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancelar')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, controller.text), child: const Text('Renombrar')),
+        ],
+      ),
+    );
+
+    if (newName != null && newName.isNotEmpty) {
+       await AppData.renameScore(docId, newName);
+    }
+  }
+
+  static Future<void> deleteScore(BuildContext context, String docId) async {
+    // Confirmación opcional para borrado individual? Por ahora directo o agregar confirmación si deseas.
+    // Usaremos confirmación simple para consistencia.
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Eliminar partitura'),
+        content: const Text('¿Eliminar este archivo?\nSe borrarán también sus anotaciones.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Eliminar', style: TextStyle(color: Colors.red))),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+       await AppData.deleteScore(docId);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // ACCIONES MASIVAS (SELECCIÓN)
+  // ---------------------------------------------------------------------------
+
+  /// Retorna true si se realizó la eliminación, para que la UI limpie la selección.
+  static Future<bool> deleteSelectedItems({
+    required BuildContext context,
+    required List<String> docIds,
+    required List<String> folderIds,
+  }) async {
+    final count = docIds.length + folderIds.length;
+    if (count == 0) return false;
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Confirmar eliminación'),
+        content: Text('¿Eliminar $count elementos seleccionados?\nLas carpetas se borrarán con todo su contenido.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true), 
+            child: const Text('Eliminar', style: TextStyle(color: Colors.red))
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      await AppData.deleteItems(docIds: docIds, folderIds: folderIds);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Elementos eliminados')));
+      }
+      return true;
+    }
+    return false;
+  }
+
+  /// Retorna true si se creó el setlist, para limpiar selección.
+  static Future<bool> createSetlistFromSelection({
+    required BuildContext context,
+    required List<String> docIds,
+    required List<String> folderIds,
+  }) async {
+    if (docIds.isEmpty && folderIds.isEmpty) return false;
+    
+    final items = AppData.getFlatDocIdsFromOrderedSelection([...docIds, ...folderIds]);
+    if (items.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('La selección no contiene partituras.')));
+      return false;
+    }
+
+    final controller = TextEditingController();
+    final name = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Nuevo Setlist'),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(hintText: 'Nombre del setlist'),
+          autofocus: true,
+          textCapitalization: TextCapitalization.sentences,
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancelar')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, controller.text),
+            child: const Text('Crear'),
+          ),
+        ],
+      ),
+    );
+
+    if (name != null && name.trim().isNotEmpty) {
+      final sName = AppData.uniqueSetlistName(name);
+      final newSetlist = Setlist(
+        setlistId: AppData.newSetlistId(),
+        name: sName,
+        docIds: items,
+      );
+      await AppData.addSetlist(newSetlist);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Setlist "$sName" creado')));
+      }
+      return true;
+    }
+    return false;
+  }
+
+  /// Retorna true si se movieron los items.
+  static Future<bool> moveSelectedItems({
+    required BuildContext context,
+    required List<String> docIds,
+    required List<String> folderIds,
+  }) async {
+    final count = docIds.length + folderIds.length;
+    if (count == 0) return false;
+
+    // 1. Calculamos IDs a ignorar (las carpetas que estamos moviendo)
+    final ignoreIds = folderIds.toList();
+
+    // 2. Abrir el Picker
+    final targetFolderId = await Navigator.of(context).push<String>(
+      MaterialPageRoute(
+        builder: (_) => FolderPickerScreen(
+          ignoreFolderIds: ignoreIds,
+          actionTitle: 'Mover $count items',
+        ),
+      ),
+    );
+
+    // 3. Ejecutar movimiento si hubo selección
+    if (targetFolderId != null) {
+      try {
+        await AppData.moveItems(
+          docIds: docIds,
+          folderIds: folderIds,
+          targetParentId: targetFolderId,
+        );
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('$count items movidos correctamente.')),
+          );
+        }
+        return true;
+      } catch (e) {
+         if (context.mounted) {
+           ScaffoldMessenger.of(context).showSnackBar(
+             SnackBar(content: Text('Error moviendo items: $e'), backgroundColor: Colors.red),
+           );
+         }
+      }
+    }
+    return false;
+  }
+}
+--- END FILE: .\lib\screens\library\library_actions.dart ---
+
+
+--- START FILE: .\lib\screens\library\library_screen.dart ---
+import 'package:flutter/material.dart';
+import '../../data/app_data.dart';
+import '../../widgets/library_browser_selector.dart';
+import '../../widgets/library_breadcrumbs.dart';
+import '../../widgets/folder_creation_dialog.dart';
+import '../../widgets/import_status_bar.dart'; 
+import '../reader/pdf_viewer_screen.dart';
+import '../../widgets/scoped_search_delegate.dart';
+import '../settings/settings_screen.dart';
+import 'library_actions.dart'; // <--- Importamos la nueva lógica
+
+class LibraryScreen extends StatefulWidget {
+  final String? initialFolderId;
+  const LibraryScreen({
+    super.key, 
+    this.initialFolderId
+  });
+
+  @override
+  State<LibraryScreen> createState() => _LibraryScreenState();
+}
+
+class _LibraryScreenState extends State<LibraryScreen> {
+  final List<String> _historyStack = [];
+  String _currentFolderId = 'root';
+
+  bool _isSelectionMode = false;
+  final Set<String> _selectedDocIds = {};
+  final Set<String> _selectedFolderIds = {};
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.initialFolderId != null) {
+      _currentFolderId = widget.initialFolderId!;
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // NAVEGACIÓN
+  // ---------------------------------------------------------------------------
+  
+  bool get _canGoBack => _historyStack.isNotEmpty || _currentFolderId != 'root';
+
+  void _pushHistoryAndNavigate(String folderId) {
+    if (_isSelectionMode) return;
+    setState(() {
+      _historyStack.add(_currentFolderId);
+      _currentFolderId = folderId;
+    });
+  }
+
+  void _navigateToSpecificFolder(String targetId) {
+    if (_isSelectionMode) return;
+    if (targetId == _currentFolderId) return;
+    setState(() {
+      _historyStack.add(_currentFolderId);
+      _currentFolderId = targetId;
+    });
+  }
+
+  Future<bool> _handleBack() async {
+    if (_isSelectionMode) {
+      _exitSelectionMode();
+      return false;
+    }
+    
+    if (_historyStack.isNotEmpty) {
+      setState(() {
+        _currentFolderId = _historyStack.removeLast();
+      });
+      return false;
+    }
+    
+    if (_currentFolderId != 'root') {
+       final current = AppData.getFolderById(_currentFolderId);
+       if (current?.parentId != null) {
+          setState(() {
+             _currentFolderId = current!.parentId!;
+          });
+          return false;
+       } else {
+          setState(() {
+            _currentFolderId = 'root';
+          });
+          return false;
+       }
+    }
+    return true;
+  }
+
+  // ---------------------------------------------------------------------------
+  // GESTIÓN DE SELECCIÓN
+  // ---------------------------------------------------------------------------
+  void _enterSelectionMode({String? initialDocId, String? initialFolderId}) {
+    setState(() {
+      _isSelectionMode = true;
+      if (initialDocId != null) _selectedDocIds.add(initialDocId);
+      if (initialFolderId != null) _selectedFolderIds.add(initialFolderId);
+    });
+  }
+
+  void _exitSelectionMode() {
+    setState(() {
+      _isSelectionMode = false;
+      _selectedDocIds.clear();
+      _selectedFolderIds.clear();
+    });
+  }
+
+  void _toggleDocSelection(String docId, bool isSelected) {
+    setState(() {
+      if (isSelected) {
+        _selectedDocIds.add(docId);
+      } else {
+        _selectedDocIds.remove(docId);
+      }
+    });
+  }
+
+  void _toggleFolderSelection(String folderId, bool isSelected) {
+    setState(() {
+      if (isSelected) {
+        _selectedFolderIds.add(folderId);
+      } else {
+        _selectedFolderIds.remove(folderId);
+      }
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // PUENTES A LIBRARY_ACTIONS
+  // ---------------------------------------------------------------------------
+
+  Future<void> _deleteSelected() async {
+    final deleted = await LibraryActions.deleteSelectedItems(
+      context: context, 
+      docIds: _selectedDocIds.toList(), 
+      folderIds: _selectedFolderIds.toList()
+    );
+    if (deleted) _exitSelectionMode();
+  }
+
+  Future<void> _createSetlist() async {
+    final created = await LibraryActions.createSetlistFromSelection(
+      context: context, 
+      docIds: _selectedDocIds.toList(), 
+      folderIds: _selectedFolderIds.toList()
+    );
+    if (created) _exitSelectionMode();
+  }
+
+  Future<void> _moveSelected() async {
+    final moved = await LibraryActions.moveSelectedItems(
+      context: context, 
+      docIds: _selectedDocIds.toList(), 
+      folderIds: _selectedFolderIds.toList()
+    );
+    if (moved) _exitSelectionMode();
+  }
+
+  // ---------------------------------------------------------------------------
+  // BUILD
+  // ---------------------------------------------------------------------------
+
+  @override
+  Widget build(BuildContext context) {
+    PreferredSizeWidget appBar;
+    final bool canSystemPop = !_isSelectionMode && !_canGoBack; 
+
+    if (_isSelectionMode) {
+      // --- APPBAR MODO SELECCIÓN ---
+      final count = _selectedDocIds.length + _selectedFolderIds.length;
+      appBar = AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.close),
+          onPressed: _exitSelectionMode,
+        ),
+        title: Text('$count'),
+        backgroundColor: Colors.grey[800],
+        foregroundColor: Colors.white,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.drive_file_move),
+            tooltip: 'Mover a...',
+            onPressed: _moveSelected,
+          ),
+          IconButton(
+            icon: const Icon(Icons.playlist_add),
+            tooltip: 'Crear Setlist',
+            onPressed: _createSetlist,
+          ),
+          IconButton(
+            icon: const Icon(Icons.delete),
+            tooltip: 'Eliminar',
+            onPressed: _deleteSelected,
+          ),
+        ],
+      );
+    } else {
+      // --- APPBAR MODO NAVEGACIÓN ---
+      appBar = AppBar(
+        automaticallyImplyLeading: false, 
+        centerTitle: false,
+        titleSpacing: 0,
+        
+        // Back + Breadcrumbs
+        title: LibraryBreadcrumbs(
+          currentFolderId: _currentFolderId,
+          onNavigateTo: _navigateToSpecificFolder,
+          onBack: _handleBack,
+        ),
+        
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.search),
+            tooltip: 'Buscar en esta carpeta',
+            onPressed: () => showSearch(
+               context: context, 
+               delegate: ScopedSearchDelegate(scopeFolderId: _currentFolderId),
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.add),
+            tooltip: 'Importar...',
+            onPressed: () => LibraryActions.showImportOptions(context, _currentFolderId),
+          ),
+          IconButton(
+            icon: const Icon(Icons.create_new_folder_outlined),
+            tooltip: 'Nueva carpeta',
+            onPressed: () => showDialog(
+                 context: context,
+                 builder: (_) => FolderCreationDialog(parentId: _currentFolderId),
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.settings),
+            tooltip: 'Configuración',
+            onPressed: () => Navigator.push(
+                 context, 
+                 MaterialPageRoute(builder: (_) => const SettingsScreen())
+            ),
+          ),
+          const SizedBox(width: 4),
+        ],
+      );
+    }
+
+    return PopScope(
+      canPop: canSystemPop,
+      onPopInvokedWithResult: (didPop, result) async {
+         if (didPop) return;
+         await _handleBack();
+      },
+      child: Scaffold(
+        appBar: appBar,
+        body: Column(
+          children: [
+            const ImportStatusBar(),
+            Expanded(
+              child: LibraryBrowserSelector(
+                currentFolderId: _currentFolderId,
+                
+                isSelectionMode: _isSelectionMode,
+                selectedDocIds: _selectedDocIds,
+                selectedFolderIds: _selectedFolderIds,
+                
+                onFolderTap: _pushHistoryAndNavigate,
+                
+                onDocTap: (docId) {
+                   final doc = AppData.getScoreById(docId);
+                   if (doc != null) {
+                     Navigator.push(
+                       context, 
+                       MaterialPageRoute(builder: (context) => PdfViewerScreen(
+                         docId: doc.docId,
+                         title: doc.title,
+                         filePath: doc.filePath ?? '',
+                       ))
+                     );
+                   }
+                },
+
+                onDocSelected: _toggleDocSelection,
+                onFolderSelected: _toggleFolderSelection,
+
+                onDocLongPress: (docId) {
+                  if (!_isSelectionMode) _enterSelectionMode(initialDocId: docId);
+                },
+                onFolderLongPress: (folderId) {
+                  if (!_isSelectionMode) _enterSelectionMode(initialFolderId: folderId);
+                },
+
+                // LÓGICA DELEGADA A LibraryActions
+                onFolderAction: (folderId, action) {
+                   if (action == 'rename') LibraryActions.renameFolder(context, folderId);
+                   if (action == 'delete') LibraryActions.deleteFolderSingle(context, folderId);
+                },
+                
+                onDocAction: (docId, action) {
+                   if (action == 'delete') LibraryActions.deleteScore(context, docId);
+                   if (action == 'rename') LibraryActions.editScoreMetadata(context, docId);
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+--- END FILE: .\lib\screens\library\library_screen.dart ---
+
+
+--- START FILE: .\lib\screens\reader\annotation_layer.dart ---
+import 'dart:math' as math;
+import 'package:flutter/material.dart';
+
+import '../../data/app_data.dart';
+import '../../models/annotation_stroke.dart';
+
+/// Overlay layer that displays and (optionally) edits non-destructive annotations.
+///
+/// v1 scope:
+/// - Global layer only (setlistId = null).
+/// - Freehand strokes (pen + highlighter).
+///
+/// Coordinates are normalized [0..1] relative to the viewport used for drawing.
+/// This keeps annotations stable across devices and resolutions.
+/// Imperative controller for [AnnotationLayer].
+///
+/// Useful to trigger undo/redo/clear from an external toolbar.
+class AnnotationLayerController {
+  _AnnotationLayerState? _state;
+
+  Future<void> undo() async => _state?.undo() ?? Future.value();
+  Future<void> redo() async => _state?.redo() ?? Future.value();
+  Future<void> clearPage() async => _state?.clearPage() ?? Future.value();
+}
+
+class AnnotationLayer extends StatefulWidget {
+  final AnnotationLayerController? controller;
+
+  final String docId;
+  final String? setlistId; // future layer
+  final int pageIndex; // 1-based
+  final bool editable;
+
+  final AnnotationTool tool;
+  final double width;
+
+  /// If true, the layer will ignore pointer events (display-only).
+  final bool ignorePointers;
+
+  const AnnotationLayer({
+    super.key,
+    this.controller,
+    required this.docId,
+    required this.pageIndex,
+    required this.editable,
+    required this.tool,
+    required this.width,
+    this.setlistId,
+    this.ignorePointers = false,
+  });
+
+  @override
+  State<AnnotationLayer> createState() => _AnnotationLayerState();
+}
+
+class _AnnotationLayerState extends State<AnnotationLayer> {
+  final List<AnnotationStroke> _strokes = <AnnotationStroke>[];
+  final List<AnnotationStroke> _redoStack = <AnnotationStroke>[];
+
+  // stroke being drawn (normalized points)
+  List<Offset>? _draftPoints;
+
+  // pointer tracking to allow 2-finger pinch/zoom to reach the PDF viewer
+  final Set<int> _activePointers = <int>{};
+  bool _allowDrawing = true;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.controller?._state = this;
+    _load();
+  }
+
+  @override
+  void didUpdateWidget(covariant AnnotationLayer oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.docId != widget.docId ||
+        oldWidget.pageIndex != widget.pageIndex ||
+        oldWidget.setlistId != widget.setlistId) {
+      _load();
+    }
+  }
+
+  @override
+  void dispose() {
+    if (widget.controller?._state == this) {
+      widget.controller!._state = null;
+    }
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    final rows = await AppData.getAnnotationStrokesForPage(
+      docId: widget.docId,
+      pageIndex: widget.pageIndex,
+      setlistId: widget.setlistId,
+    );
+    if (!mounted) return;
+    setState(() {
+      _strokes
+        ..clear()
+        ..addAll(rows);
+      _redoStack.clear();
+      _draftPoints = null;
+    });
+  }
+
+  Future<void> _commitStroke(List<Offset> pointsNorm) async {
+    if (pointsNorm.length < 2) return;
+
+    final stroke = AnnotationStroke(
+      id: AppData.newId(prefix: 'stk'),
+      docId: widget.docId,
+      setlistId: widget.setlistId,
+      pageIndex: widget.pageIndex,
+      tool: widget.tool,
+      width: widget.width,
+      pointsNorm: pointsNorm,
+      createdAtMs: DateTime.now().millisecondsSinceEpoch,
+    );
+
+    await AppData.insertAnnotationStroke(stroke);
+    if (!mounted) return;
+    setState(() {
+      _strokes.add(stroke);
+      _redoStack.clear();
+    });
+  }
+
+  Future<void> undo() async {
+    if (_strokes.isEmpty) return;
+    final last = _strokes.removeLast();
+    _redoStack.add(last);
+    setState(() {});
+    await AppData.deleteAnnotationStroke(last.id);
+  }
+
+  Future<void> redo() async {
+    if (_redoStack.isEmpty) return;
+    final s = _redoStack.removeLast();
+    setState(() => _strokes.add(s));
+    await AppData.insertAnnotationStroke(s);
+  }
+
+  Future<void> clearPage() async {
+    if (_strokes.isEmpty) return;
+    setState(() {
+      _strokes.clear();
+      _redoStack.clear();
+      _draftPoints = null;
+    });
+    await AppData.deleteAnnotationStrokesForPage(
+      docId: widget.docId,
+      pageIndex: widget.pageIndex,
+      setlistId: widget.setlistId,
+    );
+  }
+
+  Offset _normalize(Offset local, Size size) {
+    final dx = (local.dx / math.max(1.0, size.width)).clamp(0.0, 1.0);
+    final dy = (local.dy / math.max(1.0, size.height)).clamp(0.0, 1.0);
+    return Offset(dx, dy);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final displayOnly = widget.ignorePointers || !widget.editable;
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final size = Size(constraints.maxWidth, constraints.maxHeight);
+
+        Widget painted = CustomPaint(
+          painter: _AnnotationPainter(
+            strokes: _strokes,
+            draftPoints: _draftPoints,
+          ),
+          size: Size.infinite,
+        );
+
+        if (displayOnly) {
+          return IgnorePointer(child: painted);
+        }
+
+        // Editable: capture 1-finger pan to draw, but allow pinch/zoom (2 fingers)
+        return Listener(
+          onPointerDown: (e) {
+            _activePointers.add(e.pointer);
+            if (_activePointers.length > 1) {
+              _allowDrawing = false;
+              // cancel current draft if user starts a pinch
+              if (_draftPoints != null) {
+                setState(() => _draftPoints = null);
+              }
+            } else {
+              _allowDrawing = true;
+            }
+          },
+          onPointerUp: (e) {
+            _activePointers.remove(e.pointer);
+            if (_activePointers.length <= 1) {
+              _allowDrawing = true;
+            }
+          },
+          onPointerCancel: (e) {
+            _activePointers.remove(e.pointer);
+            if (_activePointers.length <= 1) {
+              _allowDrawing = true;
+            }
+          },
+          child: IgnorePointer(
+            ignoring: !_allowDrawing,
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onPanStart: (d) {
+                _draftPoints = <Offset>[_normalize(d.localPosition, size)];
+                setState(() {});
+              },
+              onPanUpdate: (d) {
+                final pts = _draftPoints;
+                if (pts == null) return;
+                pts.add(_normalize(d.localPosition, size));
+                setState(() {});
+              },
+              onPanEnd: (_) async {
+                final pts = _draftPoints;
+                if (pts == null) return;
+                setState(() => _draftPoints = null);
+                await _commitStroke(List<Offset>.from(pts));
+              },
+              onPanCancel: () {
+                setState(() => _draftPoints = null);
+              },
+              child: painted,
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _AnnotationPainter extends CustomPainter {
+  final List<AnnotationStroke> strokes;
+  final List<Offset>? draftPoints;
+
+  _AnnotationPainter({
+    required this.strokes,
+    required this.draftPoints,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    for (final s in strokes) {
+      _paintStroke(canvas, size, s.tool, s.width, s.pointsNorm);
+    }
+    final dp = draftPoints;
+    if (dp != null && dp.length >= 2) {
+      _paintStroke(canvas, size, AnnotationTool.pen, 2.0, dp);
+    }
+  }
+
+  void _paintStroke(
+    Canvas canvas,
+    Size size,
+    AnnotationTool tool,
+    double width,
+    List<Offset> pointsNorm,
+  ) {
+    if (pointsNorm.length < 2) return;
+
+    final paint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = width
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round
+      ..isAntiAlias = true;
+
+    // v1: fixed colors (can be made configurable later)
+    switch (tool) {
+      case AnnotationTool.pen:
+        paint.color = Colors.redAccent;
+        break;
+      case AnnotationTool.highlighter:
+        paint.color = Colors.yellow.withValues(alpha: 0.40);
+        break;
+    }
+
+    final path = Path();
+    final first = pointsNorm.first;
+    path.moveTo(first.dx * size.width, first.dy * size.height);
+    for (var i = 1; i < pointsNorm.length; i++) {
+      final p = pointsNorm[i];
+      path.lineTo(p.dx * size.width, p.dy * size.height);
+    }
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _AnnotationPainter oldDelegate) {
+    return oldDelegate.strokes != strokes || oldDelegate.draftPoints != draftPoints;
+  }
+}
+
+--- END FILE: .\lib\screens\reader\annotation_layer.dart ---
+
+
+--- START FILE: .\lib\screens\reader\live_setlist_screen.dart ---
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+import 'package:pdfx/pdfx.dart';
+
+import 'annotation_layer.dart';
+import '../../models/annotation_stroke.dart';
+import '../../data/app_data.dart';
+import '../../models/score.dart';
+import '../../models/setlist.dart';
+import '../../widgets/swipe_detector_layer.dart'; // <--- Importamos el nuevo widget
+
+class LiveSetlistScreen extends StatefulWidget {
+  final Setlist setlist;
+  const LiveSetlistScreen({
+    super.key,
+    required this.setlist,
+  });
+
+  @override
+  State<LiveSetlistScreen> createState() => _LiveSetlistScreenState();
+}
+
+class _LiveSetlistScreenState extends State<LiveSetlistScreen> {
+  late final List<Score> _scores;
+  int _scoreIndex = 0;
+  
+  // Controlador PDF
+  PdfControllerPinch? _controller;
+  int _currentPage = 1;
+  int _pagesCount = 0;
+
+  // UI State
+  bool _hudVisible = true;
+  Timer? _hudTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _scores = AppData.materializeSetlist(widget.setlist);
+    if (_scores.isNotEmpty) {
+      _openScoreAt(0);
+    }
+  }
+
+  @override
+  void dispose() {
+    _hudTimer?.cancel();
+    _controller?.dispose();
+    super.dispose();
+  }
+
+  // --- LÓGICA DE REPRODUCCIÓN (PLAYLIST) ---
+
+  Score? get _score => (_scores.isEmpty) ? null : _scores[_scoreIndex];
+
+  void _showHudTemporarily() {
+    if (!mounted) return;
+    setState(() => _hudVisible = true);
+    _hudTimer?.cancel();
+    _hudTimer = Timer(const Duration(milliseconds: 2500), () {
+      if (!mounted) return;
+      setState(() => _hudVisible = false);
+    });
+  }
+
+  Future<void> _openScoreAt(int newIndex) async {
+    if (_scores.isEmpty) return;
+
+    newIndex = newIndex.clamp(0, _scores.length - 1);
+    
+    // 1. Guardar estado del anterior
+    final prevScore = _score;
+    if (prevScore != null) {
+      AppData.setLastPageForDocId(prevScore.docId, _currentPage);
+    }
+
+    final next = _scores[newIndex];
+    final path = next.filePath;
+
+    // 2. Limpieza técnica del PDF Controller (Workaround para evitar crash de pdfx)
+    final oldController = _controller;
+    setState(() {
+      _scoreIndex = newIndex;
+      _pagesCount = 0;
+      _currentPage = AppData.getLastPageForDocId(next.docId);
+      _controller = null; 
+    });
+    
+    _showHudTemporarily();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      oldController?.dispose();
+    });
+
+    if (path == null || path.isEmpty) return;
+
+    // 3. Crear nuevo controlador
+    final ctrl = PdfControllerPinch(
+      document: PdfDocument.openFile(path),
+      initialPage: _currentPage, // Si tu versión de pdfx lo soporta
+    );
+    
+    if (!mounted) {
+      ctrl.dispose();
+      return;
+    }
+
+    setState(() {
+      _controller = ctrl;
+    });
+
+    // 4. Cargar contador de páginas (cache)
+    unawaited(() async {
+      final count = await AppData.getPagesCountForPath(path);
+      if (!mounted) return;
+      setState(() => _pagesCount = count);
+    }());
+  }
+
+  // --- NAVEGACIÓN ---
+
+  bool get _canGoPrevScore => _scores.isNotEmpty && _scoreIndex > 0;
+  bool get _canGoNextScore => _scores.isNotEmpty && _scoreIndex < _scores.length - 1;
+
+  Future<void> _goPrevScore() async {
+    if (!_canGoPrevScore) return;
+    await _openScoreAt(_scoreIndex - 1);
+  }
+
+  Future<void> _goNextScore() async {
+    if (!_canGoNextScore) return;
+    await _openScoreAt(_scoreIndex + 1);
+  }
+
+  void _goPrevPage() {
+    final ctrl = _controller;
+    if (ctrl == null) return;
+    _showHudTemporarily();
+    ctrl.previousPage(
+      duration: const Duration(milliseconds: 120),
+      curve: Curves.easeOut,
+    );
+  }
+
+  void _goNextPage() {
+    final ctrl = _controller;
+    if (ctrl == null) return;
+    _showHudTemporarily();
+    ctrl.nextPage(
+      duration: const Duration(milliseconds: 120),
+      curve: Curves.easeOut,
+    );
+  }
+
+  // --- BUILD ---
+
+  @override
+  Widget build(BuildContext context) {
+    final score = _score;
+    final controller = _controller;
+    
+    // Key única por documento para forzar la reconstrucción limpia del viewer
+    final pdfKey = ValueKey<String>(score?.docId ?? 'no-score');
+
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: SafeArea(
+        child: Stack(
+          children: [
+            // 1. CONTENIDO PRINCIPAL
+            if (_scores.isEmpty)
+              _EmptyLiveState(setlistName: widget.setlist.name)
+            else if (score == null || score.filePath == null || score.filePath!.isEmpty)
+              _MissingFileState(
+                title: score?.title ?? 'Archivo',
+                subtitle: 'No hay ruta de PDF para este score.',
+              )
+            else if (controller == null)
+              const Center(child: CircularProgressIndicator())
+            else
+              // AQUI ESTÁ EL REFACTOR: Usamos el Widget Delegado
+              SwipeDetectorLayer(
+                onSwipeLeft: _goNextScore,  // Izq = Siguiente tema
+                onSwipeRight: _goPrevScore, // Der = Tema anterior
+                onSwipeUp: _goNextPage,     // Arriba = Avanzar página
+                onSwipeDown: _goPrevPage,   // Abajo = Retroceder página
+                
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    // A. Visor PDF
+                    PdfViewPinch(
+                      key: pdfKey,
+                      controller: controller,
+                      onDocumentLoaded: (doc) {
+                        setState(() => _pagesCount = doc.pagesCount);
+                        _showHudTemporarily();
+                      },
+                      onPageChanged: (page) {
+                        setState(() => _currentPage = page);
+                        final s = _score;
+                        if (s != null) {
+                          AppData.setLastPageForDocId(s.docId, page);
+                        }
+                        _showHudTemporarily();
+                      },
+                    ),
+                    
+                    // B. Capa de Anotaciones (Solo lectura en vivo)
+                    Positioned.fill(
+                      child: AnnotationLayer(
+                        key: ValueKey('${_score?.docId ?? 'no_doc'}_$_currentPage'),
+                        docId: _score?.docId ?? '',
+                        pageIndex: _currentPage,
+                        editable: false,
+                        tool: AnnotationTool.pen,
+                        width: 3.0,
+                        ignorePointers: true, // Deja pasar los toques al SwipeDetector
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+            // 2. HUD SUPERIOR (Overlay)
+            Positioned(
+              left: 12,
+              right: 12,
+              top: 8,
+              child: IgnorePointer(
+                ignoring: true,
+                child: AnimatedOpacity(
+                  duration: const Duration(milliseconds: 70),
+                  opacity: _hudVisible ? 1.0 : 0.0,
+                  child: _LiveTopHud(
+                    setlistName: widget.setlist.name,
+                    title: score?.title ?? '',
+                    subtitle: '${_scoreIndex + 1}/${_scores.length}  •  pág. $_currentPage/${_pagesCount == 0 ? "?" : _pagesCount}',
+                  ),
+                ),
+              ),
+            ),
+
+            // 3. BOTÓN SALIR
+            Positioned(
+              left: 8,
+              top: 8,
+              child: SafeArea(
+                child: IconButton(
+                  icon: const Icon(Icons.arrow_back, color: Colors.white),
+                  onPressed: () {
+                    final s = _score;
+                    if (s != null) {
+                      AppData.setLastPageForDocId(s.docId, _currentPage);
+                    }
+                    Navigator.of(context).pop();
+                  },
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// --- WIDGETS AUXILIARES (Puros UI) ---
+
+class _LiveTopHud extends StatelessWidget {
+  final String setlistName;
+  final String title;
+  final String subtitle;
+
+  const _LiveTopHud({
+    required this.setlistName,
+    required this.title,
+    required this.subtitle,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.55),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+             Text(
+              setlistName,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: Colors.white70, fontSize: 12),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              subtitle,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: Colors.white70, fontSize: 12),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _EmptyLiveState extends StatelessWidget {
+  final String setlistName;
+  const _EmptyLiveState({required this.setlistName});
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Text(
+          '“$setlistName” no tiene temas para reproducir en vivo.',
+          textAlign: TextAlign.center,
+          style: const TextStyle(color: Colors.white70, fontSize: 16),
+        ),
+      ),
+    );
+  }
+}
+
+class _MissingFileState extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  const _MissingFileState({required this.title, required this.subtitle});
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              title,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              subtitle,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.white70, fontSize: 14),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+void unawaited(Future<void> f) {}
+--- END FILE: .\lib\screens\reader\live_setlist_screen.dart ---
+
+
+--- START FILE: .\lib\screens\reader\pdf_viewer_screen.dart ---
+import 'dart:async';
+import 'dart:math' as math;
+import 'dart:io';
+
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
+
+import 'annotation_layer.dart';
+import '../../models/annotation_stroke.dart';
+
+class PdfViewerScreen extends StatefulWidget {
+  final String docId;
+  final String title;
+  final String filePath;
+
+  const PdfViewerScreen({
+    super.key,
+    required this.docId,
+    required this.title,
+    required this.filePath,
+  });
+
+  @override
+  State<PdfViewerScreen> createState() => _PdfViewerScreenState();
+}
+
+class _PdfViewerScreenState extends State<PdfViewerScreen> {
+  late final PdfViewerController _controller;
+
+  int _currentPage = 1;
+  int _pagesCount = 0;
+
+  // Stabilized chrome state: only controls app UI (top bar + FAB).
+  bool _chromeVisible = true;
+
+  final AnnotationLayerController _annotationController = AnnotationLayerController();
+
+  bool _editMode = false;
+  AnnotationTool _tool = AnnotationTool.pen;
+
+  double get _toolWidth => _tool == AnnotationTool.highlighter ? 14.0 : 3.0;
+
+  bool _pageHintVisible = false;
+  Timer? _pageHintTimer;
+
+  final Set<int> _activePointers = <int>{};
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = PdfViewerController();
+
+    // Stabilizer: Never hide Android system UI. Keep edge-to-edge always.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    });
+  }
+
+  @override
+  void dispose() {
+    _pageHintTimer?.cancel();
+    _controller.dispose();
+
+    // Restore edge-to-edge (no immersive used, but keep consistent).
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+
+    super.dispose();
+  }
+
+  void _setChromeVisible(bool visible) {
+    if (_editMode) visible = true;
+    if (_chromeVisible == visible) return;
+    setState(() => _chromeVisible = visible);
+  }
+
+  void _toggleChrome() => _setChromeVisible(!_chromeVisible);
+
+  void _showPageHint() {
+    if (!_pageHintVisible) {
+      setState(() => _pageHintVisible = true);
+    }
+    _pageHintTimer?.cancel();
+    _pageHintTimer = Timer(const Duration(seconds: 2), () {
+      if (!mounted) return;
+      setState(() => _pageHintVisible = false);
+    });
+  }
+
+  Future<void> _confirmClearPage() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Borrar anotaciones de esta página'),
+        content: const Text('Esta acción no se puede deshacer.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Borrar'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) {
+      await _annotationController.clearPage();
+    }
+  }
+
+  Future<void> _toggleEditMode() async {
+    setState(() => _editMode = !_editMode);
+
+    // Rule: edit mode locks chrome visible
+    if (_editMode) {
+      _setChromeVisible(true);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final mq = MediaQuery.of(context);
+    final topPadding = mq.padding.top;
+    final safeBottom = math.max(mq.padding.bottom, mq.viewPadding.bottom);
+
+    final topBarBaseHeight = topPadding + kToolbarHeight;
+    final toolsHeight = _editMode ? 56.0 : 0.0;
+    final topBarHeight = topBarBaseHeight + toolsHeight;
+
+    return Scaffold(
+      backgroundColor: Colors.black,
+
+      // FAB: visible only when app chrome is visible.
+      floatingActionButton: AnimatedOpacity(
+        duration: const Duration(milliseconds: 160),
+        curve: Curves.easeOut,
+        opacity: (_chromeVisible) ? 1.0 : 0.0,
+        child: IgnorePointer(
+          ignoring: !_chromeVisible,
+          child: Padding(
+            padding: EdgeInsets.only(bottom: safeBottom),
+            child: FloatingActionButton.small(
+              heroTag: 'editFab',
+              backgroundColor: Colors.white,
+              foregroundColor: Colors.black,
+              onPressed: _toggleEditMode,
+              child: Icon(_editMode ? Icons.edit_off : Icons.edit),
+            ),
+          ),
+        ),
+      ),
+
+      body: Listener(
+        onPointerDown: (e) {
+          _activePointers.add(e.pointer);
+          _showPageHint();
+
+          // Optional Drive-like behavior: pinch hides app chrome.
+          if (_activePointers.length >= 2 && !_editMode) {
+            _setChromeVisible(false);
+          }
+        },
+        onPointerUp: (e) {
+          _activePointers.remove(e.pointer);
+          _showPageHint();
+        },
+        onPointerCancel: (e) {
+          _activePointers.remove(e.pointer);
+          _showPageHint();
+        },
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () {
+            if (_editMode) return;
+            _toggleChrome();
+          },
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              SfPdfViewer.file(
+                File(widget.filePath),
+                controller: _controller,
+                canShowScrollHead: true,
+                canShowScrollStatus: true,
+                onDocumentLoaded: (details) {
+                  setState(() {
+                    _pagesCount = _controller.pageCount;
+                    _currentPage = _controller.pageNumber;
+                  });
+                  _showPageHint();
+                },
+                onPageChanged: (details) {
+                  setState(() => _currentPage = details.newPageNumber);
+                  _showPageHint();
+                },
+                onZoomLevelChanged: (details) {
+                  // Drive-like behavior: pinch hides app chrome (view mode only).
+                  if (!_editMode && details.newZoomLevel != details.oldZoomLevel) {
+                    _setChromeVisible(false);
+                  }
+                },
+              ),
+
+              // Page indicator bottom-left (safe)
+              Positioned(
+                left: 12,
+                bottom: 12 + safeBottom,
+                child: IgnorePointer(
+                  ignoring: true,
+                  child: AnimatedOpacity(
+                    duration: const Duration(milliseconds: 140),
+                    curve: Curves.easeOut,
+                    opacity: _pageHintVisible ? 1 : 0,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 170),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text(
+                        '$_currentPage / $_pagesCount',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+
+              // Annotation overlay
+              Positioned.fill(
+                child: AnnotationLayer(
+                  key: ValueKey('${widget.docId}_$_currentPage'),
+                  controller: _annotationController,
+                  docId: widget.docId,
+                  pageIndex: _currentPage,
+                  editable: _editMode,
+                  tool: _tool,
+                  width: _toolWidth,
+                  ignorePointers: !_editMode,
+                ),
+              ),
+
+              // OPAQUE top bar that slides in/out
+              AnimatedPositioned(
+                duration: const Duration(milliseconds: 200),
+                curve: Curves.easeOut,
+                left: 0,
+                right: 0,
+                top: _chromeVisible ? 0 : -topBarHeight,
+                child: _TopBarWithEdit(
+                  height: topBarHeight,
+                  topPadding: topPadding,
+                  title: widget.title,
+                  editMode: _editMode,
+                  tool: _tool,
+                  onBack: () => Navigator.of(context).maybePop(),
+                  onToggleEdit: _toggleEditMode,
+                  onSelectTool: (t) => setState(() => _tool = t),
+                  onUndo: () => _annotationController.undo(),
+                  onRedo: () => _annotationController.redo(),
+                  onClearPage: _confirmClearPage,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _TopBarWithEdit extends StatelessWidget {
+  final double height;
+  final double topPadding;
+
+  final String title;
+  final bool editMode;
+  final AnnotationTool tool;
+
+  final VoidCallback onBack;
+  final VoidCallback onToggleEdit;
+  final ValueChanged<AnnotationTool> onSelectTool;
+  final VoidCallback onUndo;
+  final VoidCallback onRedo;
+  final VoidCallback onClearPage;
+
+  const _TopBarWithEdit({
+    required this.height,
+    required this.topPadding,
+    required this.title,
+    required this.editMode,
+    required this.tool,
+    required this.onBack,
+    required this.onToggleEdit,
+    required this.onSelectTool,
+    required this.onUndo,
+    required this.onRedo,
+    required this.onClearPage,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.black, // opaque
+      child: SizedBox(
+        height: height,
+        child: Column(
+          children: [
+            Padding(
+              padding: EdgeInsets.only(top: topPadding),
+              child: SizedBox(
+                height: kToolbarHeight,
+                child: Row(
+                  children: [
+                    IconButton(
+                      onPressed: onBack,
+                      icon: const Icon(Icons.arrow_back, color: Colors.white),
+                      tooltip: 'Atrás',
+                    ),
+                    Expanded(
+                      child: Text(
+                        title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: onToggleEdit,
+                      tooltip: editMode ? 'Salir de edición' : 'Editar',
+                      icon: Icon(editMode ? Icons.edit_off : Icons.edit, color: Colors.white),
+                    ),
+                    const SizedBox(width: 6),
+                  ],
+                ),
+              ),
+            ),
+            if (editMode)
+              SizedBox(
+                height: 56,
+                child: Row(
+                  children: [
+                    const SizedBox(width: 12),
+                    IconButton(
+                      tooltip: 'Lapicera',
+                      onPressed: () => onSelectTool(AnnotationTool.pen),
+                      icon: Icon(
+                        Icons.gesture,
+                        color: tool == AnnotationTool.pen ? Colors.white : Colors.white54,
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Resaltador',
+                      onPressed: () => onSelectTool(AnnotationTool.highlighter),
+                      icon: Icon(
+                        Icons.highlight,
+                        color: tool == AnnotationTool.highlighter ? Colors.white : Colors.white54,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    IconButton(
+                      tooltip: 'Deshacer',
+                      onPressed: onUndo,
+                      icon: const Icon(Icons.undo, color: Colors.white),
+                    ),
+                    IconButton(
+                      tooltip: 'Rehacer',
+                      onPressed: onRedo,
+                      icon: const Icon(Icons.redo, color: Colors.white),
+                    ),
+                    const Spacer(),
+                    IconButton(
+                      tooltip: 'Borrar página',
+                      onPressed: onClearPage,
+                      icon: const Icon(Icons.delete_outline, color: Colors.white),
+                    ),
+                    const SizedBox(width: 12),
+                  ],
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+--- END FILE: .\lib\screens\reader\pdf_viewer_screen.dart ---
+
+
+--- START FILE: .\lib\screens\setlists\add_to_setlist_screen.dart ---
+import 'package:flutter/material.dart';
+import '../../data/app_data.dart';
+import '../../widgets/library_browser_selector.dart';
+
+class AddToSetlistScreen extends StatefulWidget {
+  final String setlistName;
+  final List<String> existingDocIds;
+
+  const AddToSetlistScreen({
+    super.key,
+    required this.setlistName,
+    required this.existingDocIds,
+  });
+
+  @override
+  State<AddToSetlistScreen> createState() => _AddToSetlistScreenState();
+}
+
+class _AddToSetlistScreenState extends State<AddToSetlistScreen> {
+  final Set<String> _selectedDocIds = {};
+  final Set<String> _selectedFolderIds = {};
+  final List<String> _selectionOrder = [];
+  late final Set<String> _existingIdsSet;
+
+  String _currentFolderId = 'root';
+
+  @override
+  void initState() {
+    super.initState();
+    _existingIdsSet = widget.existingDocIds.toSet();
+  }
+
+  void _enterFolder(String folderId) {
+    setState(() => _currentFolderId = folderId);
+  }
+
+  void _navigateUp() {
+    if (_currentFolderId == 'root') return;
+    
+    final current = AppData.getFolderById(_currentFolderId);
+    setState(() {
+      _currentFolderId = current?.parentId ?? 'root';
+    });
+  }
+
+  void _onDocSelected(String id, bool selected) {
+    setState(() {
+      if (selected) {
+        _selectedDocIds.add(id);
+        _selectionOrder.add(id);
+      } else {
+        _selectedDocIds.remove(id);
+        _selectionOrder.remove(id);
+      }
+    });
+  }
+
+  void _onFolderSelected(String id, bool selected) {
+    setState(() {
+      if (selected) {
+        _selectedFolderIds.add(id);
+        _selectionOrder.add(id);
+      } else {
+        _selectedFolderIds.remove(id);
+        _selectionOrder.remove(id);
+      }
+    });
+  }
+
+  void _confirm() {
+    final finalDocIds = AppData.getFlatDocIdsFromOrderedSelection(_selectionOrder);
+    final newDocs = finalDocIds.where((id) => !_existingIdsSet.contains(id)).toList();
+    Navigator.of(context).pop<List<String>>(newDocs);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    String title = 'Agregar a "${widget.setlistName}"';
+    if (_currentFolderId != 'root') {
+      final f = AppData.getFolderById(_currentFolderId);
+      title = f?.name ?? 'Carpeta';
+    }
+
+    final bool isRoot = _currentFolderId == 'root';
+
+    return PopScope(
+      canPop: isRoot,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        _navigateUp();
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          leading: isRoot 
+            ? const CloseButton() 
+            : IconButton(
+                icon: const Icon(Icons.arrow_back), 
+                onPressed: _navigateUp
+              ),
+          title: Text(title),
+          actions: [
+            TextButton(
+              onPressed: (_selectedDocIds.isEmpty && _selectedFolderIds.isEmpty) 
+                ? null 
+                : _confirm,
+              child: const Text('Agregar'),
+            ),
+          ],
+        ),
+        body: LibraryBrowserSelector(
+          currentFolderId: _currentFolderId,
+          onFolderTap: _enterFolder,
+          
+          // Modo selección forzado con navegación permitida
+          isSelectionMode: true,
+          allowNavigationInSelectionMode: true, 
+          
+          selectedDocIds: _selectedDocIds,
+          selectedFolderIds: _selectedFolderIds,
+          
+          // CORRECCIÓN AQUÍ: Usamos el nuevo nombre genérico
+          disabledItemIds: _existingIdsSet,
+          
+          onDocSelected: _onDocSelected,
+          onFolderSelected: _onFolderSelected,
+          
+          // Al tocar, simplemente seleccionamos
+          onDocTap: (docId) => _onDocSelected(docId, !_selectedDocIds.contains(docId)),
+        ),
+      ),
+    );
+  }
+}
+--- END FILE: .\lib\screens\setlists\add_to_setlist_screen.dart ---
+
+
+--- START FILE: .\lib\screens\setlists\create_setlist_screen.dart ---
+import 'package:flutter/material.dart';
+import '../../data/app_data.dart';
+import '../../models/setlist.dart';
+import '../../widgets/library_browser_selector.dart';
+
+class CreateSetlistScreen extends StatefulWidget {
+  const CreateSetlistScreen({super.key});
+
+  @override
+  State<CreateSetlistScreen> createState() => _CreateSetlistScreenState();
+}
+
+class _CreateSetlistScreenState extends State<CreateSetlistScreen> {
+  final _nameController = TextEditingController();
+  final Set<String> _selectedDocIds = {};
+  final Set<String> _selectedFolderIds = {};
+  final List<String> _selectionOrder = [];
+  bool _saving = false;
+
+  String _currentFolderId = 'root';
+
+  void _enterFolder(String folderId) {
+    setState(() => _currentFolderId = folderId);
+  }
+
+  void _navigateUp() {
+    if (_currentFolderId == 'root') return;
+    final current = AppData.getFolderById(_currentFolderId);
+    setState(() {
+      _currentFolderId = current?.parentId ?? 'root';
+    });
+  }
+
+  void _onDocSelected(String id, bool selected) {
+    setState(() {
+      if (selected) {
+        _selectedDocIds.add(id);
+        _selectionOrder.add(id);
+      } else {
+        _selectedDocIds.remove(id);
+        _selectionOrder.remove(id);
+      }
+    });
+  }
+
+  void _onFolderSelected(String id, bool value) {
+    setState(() {
+      if (value) {
+        _selectedFolderIds.add(id);
+        _selectionOrder.add(id);
+      } else {
+        _selectedFolderIds.remove(id);
+        _selectionOrder.remove(id);
+      }
+    });
+  }
+
+  Future<void> _create() async {
+    if (_saving) return;
+
+    final desired = _nameController.text.trim();
+    final name = AppData.uniqueSetlistName(desired);
+    if (name.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Poné un nombre para el setlist.')),
+      );
+      return;
+    }
+
+    final finalDocIds = AppData.getFlatDocIdsFromOrderedSelection(_selectionOrder);
+    if (finalDocIds.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Seleccioná al menos 1 tema.')),
+      );
+      return;
+    }
+
+    final setlist = Setlist(
+      setlistId: AppData.newSetlistId(),
+      name: name,
+      docIds: finalDocIds,
+    );
+
+    setState(() => _saving = true);
+    try {
+      await AppData.addSetlist(setlist);
+      if (!mounted) return;
+      Navigator.of(context).pop(true);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: $e')),
+      );
+      setState(() => _saving = false);
+    }
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bool isRoot = _currentFolderId == 'root';
+
+    return PopScope(
+      canPop: isRoot,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        _navigateUp();
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          leading: isRoot 
+            ? const CloseButton() 
+            : IconButton(
+                icon: const Icon(Icons.arrow_back), 
+                onPressed: _navigateUp
+              ),
+          title: Text(isRoot ? 'Crear setlist' : AppData.getFolderById(_currentFolderId)?.name ?? 'Carpeta'),
+          actions: [
+            TextButton(
+              onPressed: _saving ? null : _create,
+              child: Text(_saving ? 'Guardando…' : 'Crear'),
+            ),
+          ],
+        ),
+        body: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: TextField(
+                controller: _nameController,
+                decoration: const InputDecoration(
+                  labelText: 'Nombre del setlist',
+                  border: OutlineInputBorder(),
+                ),
+                autofocus: isRoot, 
+                textCapitalization: TextCapitalization.sentences,
+              ),
+            ),
+            const Divider(height: 1),
+            
+            Expanded(
+              child: LibraryBrowserSelector(
+                currentFolderId: _currentFolderId,
+                onFolderTap: _enterFolder,
+                
+                // MODO SELECCIÓN + NAVEGACIÓN (Picker Mode)
+                isSelectionMode: true,
+                allowNavigationInSelectionMode: true, // <--- FIX AQUÍ
+                
+                selectedDocIds: _selectedDocIds,
+                selectedFolderIds: _selectedFolderIds,
+                
+                onDocSelected: _onDocSelected,
+                onFolderSelected: _onFolderSelected,
+                
+                onDocTap: (docId) => _onDocSelected(docId, !_selectedDocIds.contains(docId)),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+--- END FILE: .\lib\screens\setlists\create_setlist_screen.dart ---
+
+
+--- START FILE: .\lib\screens\setlists\setlists_screen.dart ---
+import 'package:flutter/material.dart';
+
+import '../../data/app_data.dart';
+import '../../models/setlist.dart';
+import 'setlist_detail_screen.dart';
+
+class SetlistsScreen extends StatelessWidget {
+  const SetlistsScreen({super.key});
+
+  Future<void> _confirmDeleteSetlist(BuildContext context, Setlist setlist) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Eliminar setlist'),
+          content: Text('¿Eliminar "${setlist.name}"? Esta acción no se puede deshacer.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Eliminar'),
+            ),
+          ],
+        );
+      },
+    );
+    if (ok == true) {
+      AppData.deleteSetlist(setlist.setlistId);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<int>(
+      valueListenable: AppData.setlistsRevision,
+      // CORREGIDO: (context, _, __) en lugar de (context, _, _)
+      builder: (context, _, __) {
+        final setlists = List<Setlist>.of(AppData.setlists); 
+
+        if (setlists.isEmpty) {
+          return const Center(
+            child: Text(
+              'No hay setlists.\nCreá uno con el botón +.',
+              textAlign: TextAlign.center,
+            ),
+          );
+        }
+
+        return ListView.builder(
+          padding: const EdgeInsets.all(12),
+          itemCount: setlists.length,
+          itemBuilder: (context, index) {
+            final setlist = setlists[index];
+
+            return Card(
+              child: ListTile(
+                title: Text(setlist.name),
+                subtitle: Text('${setlist.docIds.length} temas'),
+                onTap: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => SetlistDetailScreen(setlistId: setlist.setlistId),
+                    ),
+                  );
+                },
+                trailing: PopupMenuButton<String>(
+                  onSelected: (v) {
+                    if (v == 'delete') {
+                      _confirmDeleteSetlist(context, setlist);
+                    }
+                  },
+                  itemBuilder: (context) => const [
+                    PopupMenuItem(
+                      value: 'delete',
+                      child: Text('Eliminar'),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+}
+--- END FILE: .\lib\screens\setlists\setlists_screen.dart ---
+
+
+--- START FILE: .\lib\screens\setlists\setlist_detail_screen.dart ---
+import 'package:flutter/material.dart';
+
+import '../../data/app_data.dart';
+import '../../models/setlist.dart';
+import '../../models/score.dart';
+import 'add_to_setlist_screen.dart';
+import '../reader/live_setlist_screen.dart';
+import '../reader/pdf_viewer_screen.dart';
+
+class SetlistDetailScreen extends StatefulWidget {
+  final String setlistId;
+
+  const SetlistDetailScreen({
+    super.key,
+    required this.setlistId,
+  });
+
+  @override
+  State<SetlistDetailScreen> createState() => _SetlistDetailScreenState();
+}
+
+class _SetlistDetailScreenState extends State<SetlistDetailScreen> {
+  bool _isEditing = false;
+
+  Setlist? _setlistOrNull() => AppData.getSetlistById(widget.setlistId);
+
+  // --- LÓGICA DE NEGOCIO ---
+
+  Future<void> _confirmDeleteSetlist(Setlist setlist) async {
+    final nav = Navigator.of(context);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Eliminar setlist'),
+          content: Text('¿Eliminar "${setlist.name}"? Esta acción no se puede deshacer.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('Eliminar'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (!mounted) return;
+    if (ok == true) {
+      AppData.deleteSetlist(setlist.setlistId);
+      nav.pop();
+    }
+  }
+
+  Future<void> _addToSetlist(Setlist setlist) async {
+    final nav = Navigator.of(context);
+    final picked = await nav.push<List<String>>(
+      MaterialPageRoute(
+        builder: (_) => AddToSetlistScreen(
+          setlistName: setlist.name,
+          existingDocIds: List<String>.from(setlist.docIds),
+        ),
+      ),
+    );
+    if (!mounted) return;
+    if (picked == null || picked.isEmpty) return;
+
+    AppData.addDocsToSetlist(setlist.setlistId, picked);
+  }
+
+  Future<void> _removeDoc(Setlist setlist, Score score) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Quitar tema'),
+          content: Text('¿Quitar "${score.title}" del setlist?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('Quitar'),
+            ),
+          ],
+        );
+      },
+    );
+    if (!mounted) return;
+    if (ok == true) {
+      AppData.removeDocFromSetlist(setlist.setlistId, score.docId);
+    }
+  }
+
+  // --- UI BUILD ---
+
+  @override
+  Widget build(BuildContext context) {
+    final mq = MediaQuery.of(context);
+    // Ajuste seguro para el padding inferior
+    final safeBottom = mq.padding.bottom > mq.viewPadding.bottom ? mq.padding.bottom : mq.viewPadding.bottom;
+    final listPadding = EdgeInsets.fromLTRB(12, 12, 12, 12 + safeBottom);
+
+    return ValueListenableBuilder<int>(
+      valueListenable: AppData.setlistsRevision,
+      builder: (context, _, __) {
+        final setlist = _setlistOrNull();
+        
+        // 1. Estado: Setlist eliminado externamente
+        if (setlist == null) {
+          return const Scaffold(
+            body: Center(child: Text('Setlist no encontrado.')),
+          );
+        }
+
+        final scores = AppData.materializeSetlist(setlist);
+
+        return Scaffold(
+          appBar: AppBar(
+            title: Text(setlist.name),
+            actions: [
+              // Acciones principales
+              if (_isEditing) ...[
+                IconButton(
+                  tooltip: 'Agregar temas',
+                  icon: const Icon(Icons.add),
+                  onPressed: () => _addToSetlist(setlist),
+                ),
+                TextButton(
+                  onPressed: () => setState(() => _isEditing = false),
+                  child: const Text('Listo'),
+                ),
+              ] else ...[
+                 IconButton(
+                   tooltip: 'Iniciar Modo En Vivo',
+                   icon: const Icon(Icons.play_arrow, size: 28),
+                   color: Theme.of(context).primaryColor,
+                   onPressed: scores.isEmpty 
+                    ? null 
+                    : () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => LiveSetlistScreen(setlist: setlist),
+                          ),
+                        );
+                    },
+                 ),
+                 IconButton(
+                   tooltip: 'Editar orden',
+                   onPressed: () => setState(() => _isEditing = true),
+                   icon: const Icon(Icons.edit),
+                 ),
+              ],
+
+              // Menú contextual del Setlist
+              PopupMenuButton<String>(
+                onSelected: (v) {
+                  if (v == 'delete_setlist') _confirmDeleteSetlist(setlist);
+                },
+                itemBuilder: (context) => [
+                  const PopupMenuItem(
+                    value: 'delete_setlist',
+                    child: Text('Eliminar setlist'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          
+          body: scores.isEmpty
+              ? _EmptyState(onAdd: () => _addToSetlist(setlist))
+              : _isEditing
+                  // 2. Estado: Modo Edición (Reordenar y Borrar)
+                  ? ReorderableListView.builder(
+                      padding: listPadding,
+                      itemCount: scores.length,
+                      onReorder: (oldIndex, newIndex) {
+                        AppData.reorderDocInSetlist(setlist.setlistId, oldIndex, newIndex);
+                      },
+                      itemBuilder: (context, index) {
+                        final score = scores[index];
+                        return _EditableScoreTile(
+                          key: ValueKey(score.docId),
+                          index: index,
+                          score: score,
+                          onRemove: () => _removeDoc(setlist, score),
+                        );
+                      },
+                    )
+                  // 3. Estado: Modo Visualización (Leer y Abrir)
+                  : ListView.builder(
+                      padding: listPadding,
+                      itemCount: scores.length,
+                      itemBuilder: (context, index) {
+                        final score = scores[index];
+                        return _ViewScoreTile(
+                          index: index,
+                          score: score,
+                        );
+                      },
+                    ),
+        );
+      },
+    );
+  }
+}
+
+// -----------------------------------------------------------------------------
+// WIDGETS EXTRAÍDOS (UI COMPONENTS)
+// -----------------------------------------------------------------------------
+
+class _EmptyState extends StatelessWidget {
+  final VoidCallback onAdd;
+  const _EmptyState({required this.onAdd});
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Text(
+            'Este setlist está vacío.',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 16, color: Colors.grey),
+          ),
+          const SizedBox(height: 16),
+          FilledButton.icon(
+            onPressed: onAdd, 
+            icon: const Icon(Icons.add),
+            label: const Text('Agregar temas'),
+          )
+        ],
+      ),
+    );
+  }
+}
+
+class _ViewScoreTile extends StatelessWidget {
+  final int index;
+  final Score score;
+
+  const _ViewScoreTile({
+    required this.index,
+    required this.score,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final hasPdf = (score.filePath != null && score.filePath!.isNotEmpty);
+
+    return Card(
+      child: ListTile(
+        leading: CircleAvatar(
+          backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+          child: Text('${index + 1}', style: const TextStyle(fontSize: 12)),
+        ),
+        title: Text(score.title),
+        subtitle: Text(hasPdf ? 'PDF' : score.author),
+        trailing: hasPdf ? const Icon(Icons.picture_as_pdf, size: 20, color: Colors.grey) : null,
+        onTap: !hasPdf
+            ? null
+            : () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => PdfViewerScreen(
+                      docId: score.docId,
+                      title: score.title,
+                      filePath: score.filePath!,
+                    ),
+                  ),
+                );
+              },
+      ),
+    );
+  }
+}
+
+class _EditableScoreTile extends StatelessWidget {
+  final int index;
+  final Score score;
+  final VoidCallback onRemove;
+
+  const _EditableScoreTile({
+    super.key,
+    required this.index,
+    required this.score,
+    required this.onRemove,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: ListTile(
+        leading: ReorderableDragStartListener(
+          index: index,
+          child: const Icon(Icons.drag_handle),
+        ),
+        title: Text(score.title),
+        subtitle: Text(score.author),
+        trailing: IconButton(
+          tooltip: 'Quitar del setlist',
+          icon: const Icon(Icons.delete_outline),
+          onPressed: onRemove,
+        ),
+      ),
+    );
+  }
+}
+--- END FILE: .\lib\screens\setlists\setlist_detail_screen.dart ---
+
+
+--- START FILE: .\lib\screens\settings\settings_screen.dart ---
+import 'package:file_picker/file_picker.dart';
+import 'package:flutter/material.dart';
+import '../../data/backup_manager.dart';
+import '../../data/app_data.dart';
+
+class SettingsScreen extends StatefulWidget {
+  const SettingsScreen({super.key});
+
+  @override
+  State<SettingsScreen> createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends State<SettingsScreen> {
+  bool _loading = false;
+
+  Future<void> _doBackup() async {
+    setState(() => _loading = true);
+    try {
+      await BackupManager.instance.createBackup();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Backup generado correctamente.')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _doRestore() async {
+    // 1. Advertencia
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('⚠️ Restaurar Backup'),
+        content: const Text(
+          'Esta acción BORRARÁ TODA tu biblioteca actual y la reemplazará por el backup.\n\n'
+          'No se puede deshacer.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(ctx, true), 
+            child: const Text('Restaurar y Borrar Todo'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    // 2. Seleccionar archivo
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.any, // .atril no es MIME standard, usamos any o custom extension
+    );
+
+    if (result == null || result.files.single.path == null) return;
+
+    setState(() => _loading = true);
+
+    // 3. Ejecutar
+    try {
+      await BackupManager.instance.restoreBackup(result.files.single.path!);
+      
+      // 4. Refrescar UI global
+      await AppData.refreshLibrary();
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Restauración completada.')),
+        );
+        Navigator.pop(context); // Volver para recargar vistas
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error crítico restaurando: $e\nReinicia la app.'), 
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 5),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Configuración')),
+      body: _loading 
+        ? const Center(child: CircularProgressIndicator())
+        : ListView(
+            children: [
+              const Padding(
+                padding: EdgeInsets.all(16.0),
+                child: Text(
+                  'Gestión de Datos',
+                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.grey),
+                ),
+              ),
+              ListTile(
+                leading: const Icon(Icons.download),
+                title: const Text('Crear Backup'),
+                subtitle: const Text('Exportar biblioteca completa (.atril)'),
+                onTap: _doBackup,
+              ),
+              const Divider(),
+              ListTile(
+                leading: const Icon(Icons.restore, color: Colors.redAccent),
+                title: const Text('Restaurar Backup'),
+                subtitle: const Text('Importar archivo .atril (Sobreescribe todo)'),
+                onTap: _doRestore,
+              ),
+              const Padding(
+                padding: EdgeInsets.all(16.0),
+                child: Text(
+                  'v1.2 - Atril Digital',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.grey),
+                ),
+              ),
+            ],
+          ),
+    );
+  }
+}
+--- END FILE: .\lib\screens\settings\settings_screen.dart ---
+
+
+--- START FILE: .\lib\widgets\folder_creation_dialog.dart ---
+import 'package:flutter/material.dart';
+import '../data/app_data.dart';
+
+class FolderCreationDialog extends StatefulWidget {
+  final String parentId;
+
+  const FolderCreationDialog({super.key, required this.parentId});
+
+  @override
+  State<FolderCreationDialog> createState() => _FolderCreationDialogState();
+}
+
+class _FolderCreationDialogState extends State<FolderCreationDialog> {
+  final _controller = TextEditingController();
+
+  Future<void> _create() async {
+    final name = _controller.text.trim();
+    if (name.isNotEmpty) {
+      await AppData.createFolder(name: name, parentId: widget.parentId);
+      if (mounted) Navigator.of(context).pop(true);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Nueva Carpeta'),
+      content: TextField(
+        controller: _controller,
+        autofocus: true,
+        decoration: const InputDecoration(labelText: 'Nombre'),
+        textCapitalization: TextCapitalization.sentences,
+        onSubmitted: (_) => _create(),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(false),
+          child: const Text('Cancelar'),
+        ),
+        FilledButton(
+          onPressed: _create,
+          child: const Text('Crear'),
+        ),
+      ],
+    );
+  }
+}
+--- END FILE: .\lib\widgets\folder_creation_dialog.dart ---
+
+
+--- START FILE: .\lib\widgets\import_progress_dialog.dart ---
+import 'package:flutter/material.dart';
+import '../data/app_data.dart';
+
+class ImportProgressDialog extends StatelessWidget {
+  final Stream<ImportStatus> importStream;
+
+  const ImportProgressDialog({super.key, required this.importStream});
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<ImportStatus>(
+      stream: importStream,
+      builder: (context, snapshot) {
+        final status = snapshot.data;
+        
+        // Si el stream se completó, cerramos automáticamente el diálogo
+        if (snapshot.connectionState == ConnectionState.done || (status?.completed ?? false)) {
+          // Usamos postFrameCallback para evitar cerrar el diálogo durante el build
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (context.mounted) Navigator.of(context).pop(status?.count ?? 0);
+          });
+        }
+
+        return PopScope(
+          // Evitamos cerrar el diálogo con back mientras trabaja
+          canPop: false, 
+          child: AlertDialog(
+            title: const Text('Importando...'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const LinearProgressIndicator(),
+                const SizedBox(height: 20),
+                Text(
+                  'Archivos importados: ${status?.count ?? 0}',
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  status?.currentFile ?? 'Escaneando...',
+                  style: const TextStyle(fontSize: 12, color: Colors.grey),
+                  textAlign: TextAlign.center,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+--- END FILE: .\lib\widgets\import_progress_dialog.dart ---
+
+
+--- START FILE: .\lib\widgets\import_status_bar.dart ---
+import 'package:flutter/material.dart';
+import '../data/app_data.dart';
+
+class ImportStatusBar extends StatelessWidget {
+  const ImportStatusBar({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<ImportState>(
+      valueListenable: AppData.importState,
+      builder: (context, state, child) {
+        // Si no hay actividad, no mostramos nada (altura 0)
+        if (!state.isActive) {
+          return const SizedBox.shrink();
+        }
+
+        return Container(
+          width: double.infinity,
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.surfaceContainerHighest,
+            border: Border(
+              bottom: BorderSide(
+                color: Theme.of(context).dividerColor,
+                width: 1,
+              ),
+            ),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Barra de progreso
+              // Si está en 'picking' (descargando de Drive) es indeterminada (se mueve sola)
+              // Si está en 'processing' (importando) muestra el avance real
+              LinearProgressIndicator(
+                value: state.stage == ImportStage.processing ? state.progress : null,
+                minHeight: 4,
+                backgroundColor: Colors.transparent,
+              ),
+              
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: Row(
+                  children: [
+                    // Icono
+                    if (state.stage == ImportStage.picking)
+                       const SizedBox(
+                         width: 12, height: 12, 
+                         child: CircularProgressIndicator(strokeWidth: 2)
+                       )
+                    else
+                       Icon(Icons.download_rounded, size: 16, color: Theme.of(context).primaryColor),
+                    
+                    const SizedBox(width: 12),
+                    
+                    // Texto principal
+                    Expanded(
+                      child: Text(
+                        _getStatusText(state),
+                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    
+                    // Contador (ej: 3 / 10)
+                    if (state.stage == ImportStage.processing)
+                      Text(
+                        '${state.current} / ${state.total}',
+                        style: const TextStyle(fontSize: 12, color: Colors.grey),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  String _getStatusText(ImportState state) {
+    switch (state.stage) {
+      case ImportStage.picking:
+        return 'Descargando archivos...'; // Esto aparece durante la espera de Drive
+      case ImportStage.processing:
+        return 'Importando: ${state.currentItemName}';
+      case ImportStage.finishing:
+        return 'Finalizando...';
+      default:
+        return '';
+    }
+  }
+}
+--- END FILE: .\lib\widgets\import_status_bar.dart ---
+
+
+--- START FILE: .\lib\widgets\library_breadcrumbs.dart ---
+import 'package:flutter/material.dart';
+import '../data/app_data.dart';
+
+class LibraryBreadcrumbs extends StatelessWidget {
+  final String currentFolderId;
+  final Function(String) onNavigateTo;
+  final Future<bool> Function() onBack;
+
+  const LibraryBreadcrumbs({
+    super.key,
+    required this.currentFolderId,
+    required this.onNavigateTo,
+    required this.onBack,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    // Construimos la ruta completa desde la carpeta actual hasta root
+    List<String> path = [];
+    String? ptr = currentFolderId;
+    
+    // Recorremos hacia arriba hasta llegar a root o null
+    while (ptr != null && ptr != 'root') {
+      path.add(ptr);
+      final f = AppData.getFolderById(ptr);
+      ptr = f?.parentId;
+    }
+    path.add('root'); // Siempre terminamos en root
+    
+    // Invertimos para mostrar: Root > Padre > Hijo
+    final breadcrumbs = path.reversed.toList();
+    final isRoot = currentFolderId == 'root';
+
+    return Row(
+      children: [
+        // --- BOTÓN ATRÁS (O MARGEN SI ES ROOT) ---
+        if (!isRoot)
+          IconButton(
+            icon: const Icon(Icons.arrow_back),
+            onPressed: () => onBack(),
+            tooltip: 'Atrás',
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+          )
+        else
+          const SizedBox(width: 16), // Margen izquierdo estándar cuando no hay flecha
+
+        // --- RUTA SCROLLABLE ---
+        Expanded(
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            reverse: false, 
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.start,
+              children: breadcrumbs.map((fid) {
+                final isLast = fid == breadcrumbs.last;
+                final folderName = fid == 'root' 
+                    ? 'Biblioteca' 
+                    : AppData.getFolderById(fid)?.name ?? '???';
+
+                return Row(
+                  children: [
+                    // Separador ( > ) excepto para el primero
+                    if (fid != breadcrumbs.first)
+                      const Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 0),
+                        child: Icon(Icons.chevron_right, size: 20, color: Colors.grey),
+                      ),
+                    
+                    // Nombre de la carpeta
+                    InkWell(
+                      onTap: isLast ? null : () => onNavigateTo(fid),
+                      borderRadius: BorderRadius.circular(4),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+                        child: Text(
+                          folderName,
+                          style: TextStyle(
+                            fontSize: 18, // Tamaño un poco más grande para el título
+                            fontWeight: isLast ? FontWeight.bold : FontWeight.normal,
+                            color: isLast ? Colors.black : Colors.grey[700],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                );
+              }).toList(),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+--- END FILE: .\lib\widgets\library_breadcrumbs.dart ---
+
+
+--- START FILE: .\lib\widgets\library_browser_selector.dart ---
+import 'package:flutter/material.dart';
+import '../data/app_data.dart';
+import '../models/score.dart';
+import '../models/folder.dart';
+
+class LibraryBrowserSelector extends StatelessWidget {
+  final String currentFolderId;
+  
+  // Callbacks de navegación y acción
+  final Function(String folderId) onFolderTap;
+  final Function(String docId)? onDocTap;
+  
+  // Configuración de visualización
+  final bool showScores;
+
+  // Selección
+  final bool isSelectionMode;
+  /// Si es true, permite navegar (ejecutar onFolderTap) incluso cuando isSelectionMode es true.
+  final bool allowNavigationInSelectionMode; 
+
+  final Set<String> selectedDocIds;
+  final Set<String> selectedFolderIds;
+  
+  final Function(String docId, bool value)? onDocSelected;
+  final Function(String folderId, bool value)? onFolderSelected;
+
+  // Activadores
+  final Function(String docId)? onDocLongPress;
+  final Function(String folderId)? onFolderLongPress;
+
+  // Acciones de menú contextual
+  final Function(String docId, String action)? onDocAction;
+  final Function(String folderId, String action)? onFolderAction;
+
+  // Elementos deshabilitados (visual)
+  final Set<String> disabledItemIds;
+
+  /// Si es true, muestra las partituras pero grisadas y sin interacción.
+  final bool scoresDisabled;
+
+  const LibraryBrowserSelector({
+    super.key,
+    required this.currentFolderId,
+    required this.onFolderTap,
+    this.onDocTap,
+    this.showScores = true,
+    this.isSelectionMode = false,
+    this.allowNavigationInSelectionMode = false,
+    this.selectedDocIds = const {},
+    this.selectedFolderIds = const {},
+    this.onDocSelected,
+    this.onFolderSelected,
+    this.onDocLongPress,
+    this.onFolderLongPress,
+    this.onDocAction,
+    this.onFolderAction,
+    this.disabledItemIds = const {},
+    this.scoresDisabled = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<int>(
+      valueListenable: AppData.libraryRevision,
+      builder: (context, revision, _) {
+        
+        // 1. CARPETAS
+        // Las carpetas suelen ser pocas (decenas), ordenarlas aquí es barato.
+        // Mantenemos el sort local para asegurar orden alfabético visual.
+        final visibleFolders = AppData.folders
+            .where((f) => (f.parentId ?? 'root') == currentFolderId)
+            .toList()
+            ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+
+        // 2. PARTITURAS (OPTIMIZACIÓN CLAVE)
+        // Usamos la lista GLOBAL ya ordenada desde el caché de AppData.
+        // Al filtrar una lista ordenada, el subconjunto mantiene el orden.
+        // Eliminamos el costo de ordenar cientos de items en cada render.
+        List<Score> visibleDocs = [];
+        if (showScores) {
+          final allSorted = AppData.getLibrarySortedByTitle();
+          visibleDocs = allSorted
+              .where((s) => s.folderId == currentFolderId)
+              .toList();
+        }
+
+        if (visibleFolders.isEmpty && visibleDocs.isEmpty) {
+          return const Center(
+            child: Padding(
+              padding: EdgeInsets.all(32.0),
+              child: Text(
+                'Carpeta vacía.',
+                style: TextStyle(color: Colors.grey, fontSize: 16),
+              ),
+            ),
+          );
+        }
+
+        return ListView(
+          padding: const EdgeInsets.only(bottom: 80),
+          children: [
+            // --- SECCIÓN CARPETAS ---
+            ...visibleFolders.map((f) => _buildFolderTile(context, f)),
+
+            // --- SECCIÓN ARCHIVOS ---
+            ...visibleDocs.map((doc) => _buildScoreTile(context, doc)),
+          ],
+        );
+      },
+    );
+  }
+
+  // Helper para construir la tile de Carpeta
+  Widget _buildFolderTile(BuildContext context, Folder f) {
+    final isSelected = selectedFolderIds.contains(f.id);
+    final isDisabled = disabledItemIds.contains(f.id);
+    
+    // Lógica de navegación vs selección
+    final bool canTap = !isDisabled && (!isSelectionMode || allowNavigationInSelectionMode);
+
+    Widget? trailingWidget;
+    if (isSelectionMode && onFolderSelected != null && !isDisabled) {
+      trailingWidget = Checkbox(
+        value: isSelected,
+        onChanged: (v) => onFolderSelected!(f.id, v ?? false),
+      );
+    } else if (!isSelectionMode && onFolderAction != null && !isDisabled) {
+      trailingWidget = PopupMenuButton<String>(
+        onSelected: (action) => onFolderAction!(f.id, action),
+        itemBuilder: (context) => const [
+          PopupMenuItem(value: 'rename', child: Text('Renombrar')),
+          PopupMenuItem(value: 'delete', child: Text('Eliminar', style: TextStyle(color: Colors.red))),
+        ],
+      );
+    }
+
+    return ListTile(
+      leading: Icon(Icons.folder, color: isDisabled ? Colors.grey[400] : Colors.amber[700], size: 32),
+      title: Text(
+        f.name,
+        style: TextStyle(
+          color: isDisabled ? Colors.grey : null,
+          fontStyle: isDisabled ? FontStyle.italic : null,
+        ),
+      ),
+      selected: isSelected,
+      enabled: !isDisabled,
+      selectedTileColor: Theme.of(context).primaryColor.withValues(alpha: 0.1),
+      onTap: canTap ? () => onFolderTap(f.id) : null,
+      onLongPress: isDisabled ? null : () => onFolderLongPress?.call(f.id),
+      trailing: trailingWidget,
+    );
+  }
+
+  // Helper para construir la tile de Partitura
+  Widget _buildScoreTile(BuildContext context, Score doc) {
+    final isSelected = selectedDocIds.contains(doc.docId);
+    
+    // Es disabled si está en la lista negra O si el modo global scoresDisabled está activo
+    final isSpecificDisabled = disabledItemIds.contains(doc.docId);
+    final isDisabled = isSpecificDisabled || scoresDisabled;
+
+    Widget? trailingWidget;
+    
+    // Lógica visual:
+    if (isSpecificDisabled) {
+      // Caso 1: Específico (ej: "Ya agregado al setlist") -> Muestra Check
+      trailingWidget = const Icon(Icons.check, color: Colors.grey);
+    } else if (scoresDisabled) {
+      // Caso 2: Contexto (ej: "Folder Picker") -> Solo gris, sin ícono extra
+      trailingWidget = null;
+    } else if (isSelectionMode && onDocSelected != null) {
+      trailingWidget = Checkbox(
+        value: isSelected,
+        onChanged: (v) => onDocSelected!(doc.docId, v ?? false),
+      );
+    } else if (!isSelectionMode && onDocAction != null) {
+      trailingWidget = PopupMenuButton<String>(
+        onSelected: (action) => onDocAction!(doc.docId, action),
+        itemBuilder: (context) => const [
+          PopupMenuItem(value: 'rename', child: Text('Editar datos')),
+          PopupMenuItem(value: 'delete', child: Text('Eliminar', style: TextStyle(color: Colors.red))),
+        ],
+      );
+    }
+
+    return ListTile(
+      leading: Icon(
+        Icons.picture_as_pdf, 
+        color: isDisabled ? Colors.grey[400] : Colors.redAccent, 
+        size: 32
+      ),
+      
+      title: Text(
+        doc.title,
+        style: TextStyle(
+          color: isDisabled ? Colors.grey : null,
+          fontStyle: isDisabled ? FontStyle.italic : null,
+        ),
+      ),
+      
+      subtitle: doc.author.isNotEmpty 
+          ? Text(
+              doc.author,
+              style: TextStyle(
+                color: isDisabled ? Colors.grey : null,
+                fontStyle: isDisabled ? FontStyle.italic : null,
+              ),
+            ) 
+          : null,
+          
+      selected: isSelected,
+      enabled: !isDisabled, 
+      
+      selectedTileColor: Theme.of(context).primaryColor.withValues(alpha: 0.1),
+      onTap: (isDisabled || onDocTap == null) ? null : () => onDocTap!(doc.docId),
+      onLongPress: isDisabled ? null : () => onDocLongPress?.call(doc.docId),
+      trailing: trailingWidget,
+    );
+  }
+}
+--- END FILE: .\lib\widgets\library_browser_selector.dart ---
+
+
+--- START FILE: .\lib\widgets\scoped_search_delegate.dart ---
+import 'package:flutter/material.dart';
+import '../data/app_data.dart';
+// Imports removidos por no ser necesarios directos, AppData ya nos da los modelos si se necesitan tipados
+// pero aquí usamos dynamic o inferencia.
+import '../screens/reader/pdf_viewer_screen.dart';
+import '../screens/library/library_screen.dart';
+
+class ScopedSearchDelegate extends SearchDelegate<dynamic> {
+  final String scopeFolderId; 
+
+  ScopedSearchDelegate({required this.scopeFolderId});
+
+  @override
+  String get searchFieldLabel {
+    if (scopeFolderId == 'root') return 'Buscar en biblioteca...';
+    final folder = AppData.getFolderById(scopeFolderId);
+    return 'Buscar en "${folder?.name ?? '...'}"...';
+  }
+
+  @override
+  List<Widget>? buildActions(BuildContext context) {
+    return [
+      if (query.isNotEmpty)
+        IconButton(
+          icon: const Icon(Icons.clear),
+          onPressed: () {
+            query = '';
+            showSuggestions(context);
+          },
+        ),
+    ];
+  }
+
+  @override
+  Widget? buildLeading(BuildContext context) {
+    return IconButton(
+      icon: const Icon(Icons.arrow_back),
+      onPressed: () => close(context, null),
+    );
+  }
+
+  @override
+  Widget buildResults(BuildContext context) {
+    return _buildList(context);
+  }
+
+  @override
+  Widget buildSuggestions(BuildContext context) {
+    return _buildList(context);
+  }
+
+  Widget _buildList(BuildContext context) {
+    final cleanQuery = query.trim().toLowerCase();
+    
+    if (cleanQuery.isEmpty) {
+      return Center(
+        child: Text(
+          scopeFolderId == 'root' 
+              ? 'Buscando globalmente...' 
+              : 'Buscando en esta carpeta y subcarpetas...',
+          style: const TextStyle(color: Colors.grey),
+        ),
+      );
+    }
+
+    Set<String> validFolderIds;
+    if (scopeFolderId == 'root') {
+      validFolderIds = {}; 
+    } else {
+      validFolderIds = AppData.getRecursiveFolderIds(scopeFolderId);
+    }
+
+    final matchedFolders = AppData.folders.where((f) {
+      if (scopeFolderId != 'root' && !validFolderIds.contains(f.parentId)) {
+        return false;
+      }
+      return f.name.toLowerCase().contains(cleanQuery);
+    }).toList();
+
+    final matchedScores = AppData.library.where((s) {
+      if (scopeFolderId != 'root') {
+        if (!validFolderIds.contains(s.folderId)) return false;
+      }
+      return s.title.toLowerCase().contains(cleanQuery) || 
+             s.author.toLowerCase().contains(cleanQuery);
+    }).toList();
+
+    if (matchedFolders.isEmpty && matchedScores.isEmpty) {
+      return const Center(child: Text('Sin resultados.'));
+    }
+
+    return ListView(
+      children: [
+        if (matchedFolders.isNotEmpty) ...[
+          const Padding(
+            padding: EdgeInsets.all(12),
+            child: Text('Carpetas', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)),
+          ),
+          ...matchedFolders.map((f) => ListTile(
+            leading: Icon(Icons.folder, color: Colors.amber[700]),
+            title: Text(f.name),
+            subtitle: Text(_getParentPath(f.parentId)),
+            onTap: () {
+              // Navegar: Abrimos LibraryScreen encima
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => LibraryScreen(initialFolderId: f.id),
+                ),
+              );
+            },
+          )),
+        ],
+
+        if (matchedScores.isNotEmpty) ...[
+          const Padding(
+            padding: EdgeInsets.all(12),
+            child: Text('Partituras', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)),
+          ),
+          ...matchedScores.map((s) => ListTile(
+            leading: const Icon(Icons.picture_as_pdf, color: Colors.redAccent),
+            title: Text(s.title),
+            subtitle: Text(s.author.isNotEmpty ? s.author : _getParentPath(s.folderId)),
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => PdfViewerScreen(
+                    docId: s.docId,
+                    title: s.title,
+                    filePath: s.filePath ?? '',
+                  ),
+                ),
+              );
+            },
+            trailing: PopupMenuButton<String>(
+              onSelected: (value) {
+                if (value == 'loc') {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => LibraryScreen(initialFolderId: s.folderId),
+                    ),
+                  );
+                }
+              },
+              itemBuilder: (context) => [
+                const PopupMenuItem(
+                  value: 'loc',
+                  child: Row(children: [Icon(Icons.folder_open), SizedBox(width: 8), Text('Abrir ubicación')]),
+                ),
+              ],
+            ),
+          )),
+        ],
+      ],
+    );
+  }
+
+  String _getParentPath(String? parentId) {
+    if (parentId == null || parentId == 'root') return 'En: Biblioteca';
+    final parent = AppData.getFolderById(parentId);
+    return 'En: ${parent?.name ?? '...'}';
+  }
+}
+--- END FILE: .\lib\widgets\scoped_search_delegate.dart ---
+
+
+--- START FILE: .\lib\widgets\score_import_logic.dart ---
+import 'package:file_picker/file_picker.dart';
+import 'package:flutter/material.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'dart:io';
+import '../data/app_data.dart';
+import 'import_progress_dialog.dart';
+
+class ScoreImportLogic {
+  
+  static Future<void> pickAndImportFiles(BuildContext context, String targetFolderId) async {
+    // 1. Permisos básicos
+    await [Permission.storage].request();
+
+    try {
+      // 2. ACTIVAR UI: "Descargando..." (Indeterminado)
+      // Esto se mostrará INMEDIATAMENTE, cubriendo el tiempo que el Picker tarda en descargar.
+      AppData.importState.value = const ImportState(stage: ImportStage.picking);
+
+      // 3. Selección de Archivos
+      // El sistema operativo descargará los archivos antes de devolver el control aquí.
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['pdf'],
+        allowMultiple: true,
+      );
+
+      // Si el usuario cancela, volvemos a IDLE
+      if (result == null || result.files.isEmpty) {
+        AppData.importState.value = const ImportState(stage: ImportStage.idle);
+        return;
+      }
+
+      final validPaths = result.files
+          .map((f) => f.path)
+          .where((path) => path != null)
+          .cast<String>()
+          .toList();
+
+      if (validPaths.isEmpty) {
+        AppData.importState.value = const ImportState(stage: ImportStage.idle);
+        return;
+      }
+
+      // 4. INICIAR IMPORTACIÓN EN "BACKGROUND"
+      // "Fire and forget": No usamos await para no bloquear la UI.
+      // La barra ImportStatusBar se encargará de mostrar el progreso.
+      AppData.importBatchBackground(validPaths, targetFolderId).catchError((e) {
+        debugPrint("Error en background import: $e");
+        AppData.importState.value = const ImportState(stage: ImportStage.idle);
+      });
+
+    } catch (e) {
+      // En caso de error crítico antes de empezar
+      AppData.importState.value = const ImportState(stage: ImportStage.idle);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error al iniciar importación: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  static Future<void> pickAndImportFolder(BuildContext context, String targetFolderId) async {
+    // Permiso especial para Android 10+ (Scoped Storage)
+    if (Platform.isAndroid) {
+      var status = await Permission.manageExternalStorage.status;
+      if (!status.isGranted) {
+        status = await Permission.manageExternalStorage.request();
+        if (!status.isGranted && context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Se requiere acceso total a archivos para importar carpetas.'),
+          ));
+          return;
+        }
+      }
+    }
+
+    // Activamos estado "Descargando/Buscando"
+    AppData.importState.value = const ImportState(stage: ImportStage.picking);
+
+    final String? path = await FilePicker.platform.getDirectoryPath();
+    
+    if (path == null) {
+      // Cancelado
+      AppData.importState.value = const ImportState(stage: ImportStage.idle);
+      return;
+    }
+
+    // Para carpetas mantenemos el diálogo modal por ahora, ya que la lógica recursiva
+    // está implementada con Streams y puede ser muy pesada para background sin cambios profundos.
+    // Desactivamos la barra superior para no duplicar feedback.
+    AppData.importState.value = const ImportState(stage: ImportStage.idle);
+
+    final stream = AppData.importFolderStream(path, targetFolderId);
+    if (context.mounted) {
+      final resultCount = await showDialog<int>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => ImportProgressDialog(importStream: stream),
+      );
+
+      if (context.mounted && resultCount != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Importación completada: $resultCount archivos.')),
+        );
+      }
+    }
+  }
+}
+--- END FILE: .\lib\widgets\score_import_logic.dart ---
+
+
+--- START FILE: .\lib\widgets\swipe_detector_layer.dart ---
+import 'package:flutter/material.dart';
+import 'dart:math' as math;
+
+/// Un widget que detecta Swipes (Arriba, Abajo, Izq, Der) con 1 solo dedo,
+/// pero cancela la detección si el usuario pone un segundo dedo (para permitir Pinch Zoom).
+class SwipeDetectorLayer extends StatefulWidget {
+  final Widget child;
+  final VoidCallback? onSwipeLeft;  // Siguiente tema
+  final VoidCallback? onSwipeRight; // Tema anterior
+  final VoidCallback? onSwipeUp;    // Siguiente página
+  final VoidCallback? onSwipeDown;  // Página anterior
+
+  const SwipeDetectorLayer({
+    super.key,
+    required this.child,
+    this.onSwipeLeft,
+    this.onSwipeRight,
+    this.onSwipeUp,
+    this.onSwipeDown,
+  });
+
+  @override
+  State<SwipeDetectorLayer> createState() => _SwipeDetectorLayerState();
+}
+
+class _SwipeDetectorLayerState extends State<SwipeDetectorLayer> {
+  // Para distinguir 1 dedo vs 2 dedos
+  final Set<int> _activePointers = <int>{};
+  
+  // Flag: este gesto fue 1 dedo (si entra un 2do dedo, se anula navegación)
+  bool _oneFingerGesture = false;
+  
+  // Rastreo de posición
+  Offset? _dragStart;
+  Offset? _dragLast;
+
+  // Umbrales de configuración
+  static const double _minSwipeDistance = 42; // px mínimos para considerar swipe
+  static const double _axisDominanceRatio = 1.25; // Para evitar diagonales accidentales
+
+  void _handleSwipeEndIfAny() {
+    if (!_oneFingerGesture) return;
+
+    final s = _dragStart;
+    final e = _dragLast;
+    
+    // Reseteamos
+    _dragStart = null;
+    _dragLast = null;
+
+    if (s == null || e == null) return;
+
+    final dx = e.dx - s.dx;
+    final dy = e.dy - s.dy;
+    final adx = dx.abs();
+    final ady = dy.abs();
+
+    // 1. Verificar distancia mínima
+    if (math.max(adx, ady) < _minSwipeDistance) return;
+
+    // 2. Determinar eje dominante
+    if (adx > ady * _axisDominanceRatio) {
+      // Horizontal
+      if (dx < 0) {
+        widget.onSwipeLeft?.call();
+      } else {
+        widget.onSwipeRight?.call();
+      }
+    } else if (ady > adx * _axisDominanceRatio) {
+      // Vertical
+      if (dy < 0) {
+        widget.onSwipeUp?.call();
+      } else {
+        widget.onSwipeDown?.call();
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Listener(
+      onPointerDown: (e) {
+        _activePointers.add(e.pointer);
+
+        if (_activePointers.length == 1) {
+          _oneFingerGesture = true;
+          _dragStart = e.position;
+          _dragLast = e.position;
+        } else {
+          // En cuanto hay 2 dedos, anulamos navegación por swipe (es un pinch)
+          _oneFingerGesture = false;
+          _dragStart = null;
+          _dragLast = null;
+        }
+      },
+      onPointerMove: (e) {
+        if (_oneFingerGesture && _dragStart != null) {
+          _dragLast = e.position;
+        }
+      },
+      onPointerUp: (e) {
+        _activePointers.remove(e.pointer);
+        if (_activePointers.isEmpty) {
+          _handleSwipeEndIfAny();
+          _oneFingerGesture = false; // reset final
+        }
+      },
+      onPointerCancel: (e) {
+        _activePointers.remove(e.pointer);
+        if (_activePointers.isEmpty) {
+          _dragStart = null;
+          _dragLast = null;
+          _oneFingerGesture = false;
+        }
+      },
+      child: widget.child,
+    );
+  }
+}
+--- END FILE: .\lib\widgets\swipe_detector_layer.dart ---

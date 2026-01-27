@@ -1,0 +1,55 @@
+name: pdf_setlist
+description: "Gestor de partituras PDF."
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # Archivos y Permisos (Versiones Modernas)
+  file_picker: ^10.3.0
+  path: ^1.9.0
+  permission_handler: ^11.3.0
+  path_provider: ^2.1.2
+
+  archive: ^3.6.1
+  share_plus: ^10.0.0
+  intl: ^0.19.0
+  shared_preferences: ^2.2.2
+  wakelock_plus: ^1.1.4
+
+  # PDF (Versiones Modernas)
+  syncfusion_flutter_pdf: ^32.1.24
+  # ACTUALIZADO: Saltamos de la v24 a la v32 para arreglar el error de compilación
+  syncfusion_flutter_pdfviewer: ^32.1.24
+  
+  # Base de datos
+  drift: ^2.16.0
+  drift_flutter: ^0.1.0
+  sqlite3_flutter_libs: ^0.5.18
+
+  # UI
+  cupertino_icons: ^1.0.6
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  drift_dev: ^2.16.0
+  build_runner: ^2.4.8
+  flutter_lints: ^3.0.0
+  flutter_launcher_icons: ^0.13.1
+
+flutter:
+  uses-material-design: true
+
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: true
+  image_path: "Atril_cropped.png"
+  min_sdk_android: 21
+  adaptive_icon_background: "#FFFFFF"
+  adaptive_icon_foreground: "Atril_cropped.png"
