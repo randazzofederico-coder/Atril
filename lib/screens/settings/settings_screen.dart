@@ -16,7 +16,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _doBackup() async {
     setState(() => _loading = true);
     try {
-      await BackupManager.instance.createBackup();
+      await BackupManager.instance.createBackup(context);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Backup generado correctamente.')),
@@ -58,12 +58,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final result = await FilePicker.platform.pickFiles(type: FileType.any);
 
     if (result == null || result.files.single.path == null) return;
+    
+    if (!mounted) return;
 
     setState(() => _loading = true);
 
     try {
-      await BackupManager.instance.restoreBackup(result.files.single.path!);
+      await BackupManager.instance.restoreBackup(context, result.files.single.path!);
       await AppData.refreshLibrary();
+      AppData.triggerNavigationReset();
       
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -88,18 +91,37 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Escuchamos cambios para que los switches/sliders se actualicen visualmente
+    // Escuchamos cambios para que los switches/sliders y el progreso se actualicen
     return AnimatedBuilder(
       animation: Listenable.merge([
         AppData.settings.themeMode,
         AppData.settings.uiScale,
         AppData.settings.keepScreenOn,
         AppData.settings.invertPdfColors,
+        AppData.backgroundTaskProgress, // Escuchar progreso global
       ]),
-      builder: (context, _) => Scaffold(
+      builder: (context, _) {
+        final taskStatus = AppData.backgroundTaskProgress.value;
+        final isBusy = _loading || taskStatus != null;
+
+        return Scaffold(
         appBar: AppBar(title: const Text('Configuración')),
-        body: _loading 
-          ? const Center(child: CircularProgressIndicator())
+        body: isBusy 
+          ? Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                   const CircularProgressIndicator(),
+                   const SizedBox(height: 16),
+                   if (taskStatus != null) ...[
+                      Text(taskStatus.message),
+                      const SizedBox(height: 8),
+                      Text(taskStatus.percentage),
+                   ] else 
+                      const Text('Cargando...'),
+                ],
+              ),
+            )
           : ListView(
               children: [
                 _buildSectionHeader('Apariencia'),
@@ -125,7 +147,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
               ],
             ),
-      ),
+      );
+      } 
     );
   }
 
@@ -237,7 +260,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _doExportZip() async {
     setState(() => _loading = true);
     try {
-      await BackupManager.instance.exportLibraryToZip();
+      await BackupManager.instance.exportLibraryToZip(context);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Exportación lista.')),
@@ -257,10 +280,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _doImport() async {
     final result = await FilePicker.platform.pickFiles(type: FileType.any);
     if (result == null || result.files.single.path == null) return;
+    
+    if (!mounted) return;
 
     setState(() => _loading = true);
     try {
-      await BackupManager.instance.importBackup(result.files.single.path!);
+      await BackupManager.instance.importBackup(context, result.files.single.path!);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Contenido, importado en carpeta "Backup Importado".')),

@@ -1,6 +1,8 @@
 import 'dart:io';
 import 'package:syncfusion_flutter_pdf/pdf.dart';
 import '../../models/setlist.dart';
+import '../../models/score.dart';
+import '../../models/folder.dart';
 import '../app_data.dart';
 
 class LibraryRepository {
@@ -9,78 +11,114 @@ class LibraryRepository {
   // FOLDERS
   // ---------------------------------------------------------------------------
 
-  static Future<String> createFolder({
+  // ---------------------------------------------------------------------------
+  // FOLDERS
+  // ---------------------------------------------------------------------------
+
+  static Future<Folder> createFolder({
     required String name,
     required String parentId,
-    bool refresh = true,
   }) async {
+    // Garantizar nombre único (Auto-Rename)
+    final uniqueName = uniqueFolderName(name, parentId);
+    
     final id = AppData.newFolderId();
     // Calculamos posición basada en los folders actuales en memoria
     final siblings = AppData.folders.where((f) => (f.parentId ?? 'root') == parentId).length;
     
+    // DB Update
     await AppData.db.createFolder(
       id: id,
-      name: name,
+      name: uniqueName,
       parentId: parentId == 'root' ? null : parentId,
       position: siblings,
     );
-    
-    if (refresh) await AppData.refreshLibrary();
-    return id;
+
+    // Return constructed object for local cache update
+    return Folder(
+      id: id, 
+      name: uniqueName, 
+      parentId: parentId, 
+      position: siblings
+    );
   }
 
-  static Future<void> renameFolder(String folderId, String newName) async {
-    final f = AppData.getFolderById(folderId);
-    if (f == null) return;
+  static bool folderNameExists(String name, String parentId) {
+    return AppData.folders.any((f) => 
+      (f.parentId ?? 'root') == parentId && 
+      f.name.toLowerCase() == name.trim().toLowerCase()
+    );
+  }
 
+  static String uniqueFolderName(String desiredName, String parentId) {
+    final base = desiredName.trim();
+    if (base.isEmpty) return 'Nueva Carpeta';
+
+    if (!folderNameExists(base, parentId)) return base;
+
+    var n = 2;
+    while (true) {
+      final cand = '$base ($n)';
+      if (!folderNameExists(cand, parentId)) return cand;
+      n++;
+    }
+  }
+
+  static Future<Folder?> renameFolder(String folderId, String newName) async {
+    final f = AppData.getFolderById(folderId);
+    if (f == null) return null;
+
+    // DB Update
     await AppData.db.upsertFolder(
       id: f.id,
       name: newName,
-      parentId: f.parentId, // Mantenemos el mismo padre
-      position: f.position, // Mantenemos la misma posición
+      parentId: f.parentId,
+      position: f.position,
     );
-    await AppData.refreshLibrary();
-  }
 
-  // Cambiamos la firma para aceptar (opcionalmente) un nuevo autor
-  static Future<void> updateScoreMetadata({
-    required String docId, 
-    required String newTitle, 
-    required String newAuthor
-  }) async {
-    final s = AppData.getScoreById(docId);
-    if (s == null) return;
-    
-    // Mantenemos el path relativo interno igual
-    final relPath = AppData.storage.docRelPath(s.docId);
-    
-    await AppData.db.upsertDoc(
-      id: s.docId,
-      displayName: newTitle, // Actualizamos Título
-      author: newAuthor,     // Actualizamos Autor
-      internalRelPath: relPath,
-      folderId: s.folderId,
+    // Return updated object
+    return Folder(
+      id: f.id,
+      name: newName,
+      parentId: f.parentId,
+      position: f.position,
     );
-    await AppData.refreshLibrary();
   }
 
   // ---------------------------------------------------------------------------
   // SCORES
   // ---------------------------------------------------------------------------
 
-  static Future<void> renameScore(String docId, String newTitle) async {
+  static Future<Score?> updateScoreMetadata({
+    required String docId, 
+    required String newTitle, 
+    required String newAuthor
+  }) async {
     final s = AppData.getScoreById(docId);
-    if (s == null) return;
+    if (s == null) return null;
     
     final relPath = AppData.storage.docRelPath(s.docId);
+    
+    // DB Update
     await AppData.db.upsertDoc(
       id: s.docId,
-      displayName: newTitle,
-      author: s.author,
+      displayName: newTitle, 
+      author: newAuthor,    
       internalRelPath: relPath,
       folderId: s.folderId,
     );
-    await AppData.refreshLibrary();
+
+    return Score(
+      docId: s.docId,
+      title: newTitle,
+      author: newAuthor,
+      filePath: s.filePath,
+      folderId: s.folderId,
+    );
+  }
+
+  static Future<Score?> renameScore(String docId, String newTitle) async {
+    return updateScoreMetadata(docId: docId, newTitle: newTitle, newAuthor: '');
   }
 
   static String uniqueTitle(String desiredTitle) {
@@ -133,7 +171,7 @@ class LibraryRepository {
         );
       }
     }
-    await AppData.refreshLibrary();
+    // NOTA: El llamador es responsable de actualizar el estado local (AppData) o refrescar.
   }
 
   static Future<void> deleteItems({
@@ -141,12 +179,12 @@ class LibraryRepository {
     required List<String> folderIds,
   }) async {
     for (final id in docIds) {
-      await deleteScore(id, refresh: false);
+      await deleteScore(id);
     }
     for (final id in folderIds) {
       await _deleteFolderRecursive(id);
     }
-    await AppData.refreshLibrary();
+    // NOTA: El llamador es responsable de refrescar.
   }
 
   static Future<void> _deleteFolderRecursive(String folderId) async {
@@ -158,13 +196,13 @@ class LibraryRepository {
     // Borrar docs dentro
     final childrenD = AppData.library.where((d) => d.folderId == folderId).toList();
     for (final doc in childrenD) {
-      await deleteScore(doc.docId, refresh: false);
+      await deleteScore(doc.docId);
     }
     // Borrar la carpeta en sí
     await AppData.db.deleteFolder(folderId);
   }
 
-  static Future<void> deleteScore(String docId, {bool refresh = true}) async {
+  static Future<void> deleteScore(String docId) async {
     final score = AppData.getScoreById(docId);
     if (score == null) return;
 
@@ -186,7 +224,6 @@ class LibraryRepository {
     await AppData.db.deleteDocStateByDocId(docId);
     await AppData.db.deleteDocById(docId);
     await AppData.storage.deleteDocFile(docId);
-    if (refresh) await AppData.refreshLibrary();
   }
 
   // ---------------------------------------------------------------------------

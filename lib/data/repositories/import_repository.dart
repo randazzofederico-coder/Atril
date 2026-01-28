@@ -119,6 +119,8 @@ class ImportRepository {
 
     // Estado inicial: Procesando 0/Total
     _updateState(stage: ImportStage.processing, total: total, current: 0);
+    // Global UI
+    AppData.backgroundTaskProgress.value = const BackgroundTaskStatus(0.0, 'Iniciando importación...');
 
     for (final path in filePaths) {
       try {
@@ -131,6 +133,8 @@ class ImportRepository {
           current: current + 1,
           name: fileName,
         );
+        // Global UI
+        AppData.backgroundTaskProgress.value = BackgroundTaskStatus(current / total, 'Importando $fileName');
 
         await importPdfFromExternalPath(
           sourcePath: path,
@@ -149,106 +153,119 @@ class ImportRepository {
 
     // Refrescar DB y UI global
     _updateState(stage: ImportStage.finishing, name: 'Actualizando biblioteca...');
+    AppData.backgroundTaskProgress.value = const BackgroundTaskStatus(1.0, 'Finalizando importación...');
+    
     await AppData.refreshLibrary();
 
     // Reset a estado inactivo
     _updateState(stage: ImportStage.idle);
+    AppData.backgroundTaskProgress.value = null;
   }
 
-  /// Método Stream para ImportProgressDialog
-  static Stream<ImportStatus> importBatchStream(List<String> filePaths, String targetFolderId) async* {
-    int current = 0;
-    for (final path in filePaths) {
-      final fileName = p.basename(path).replaceAll('.pdf', '');
-      yield ImportStatus(count: current, currentFile: fileName);
-
-      try {
-        await importPdfFromExternalPath(
-          sourcePath: path,
-          desiredTitle: fileName,
-          targetFolderId: targetFolderId,
-          refresh: false,
-        );
-        current++;
-        await Future.delayed(Duration.zero);
-      } catch (e) {
-        debugPrint("Error importando $path: $e");
-      }
-      yield ImportStatus(count: current, currentFile: fileName);
-    }
-
-    // Refresco final
-    await AppData.refreshLibrary();
-    yield ImportStatus(count: current, currentFile: 'Finalizado', completed: true);
-  }
-
-  /// Método Recursivo (Legacy) para carpetas completas
-  static Stream<ImportStatus> importFolderStream(String path, String targetParentId) async* {
-    int totalImported = 0;
-    await for (final count in _importFolderStreamRecursive(path, targetParentId)) {
-      totalImported += count;
-      yield ImportStatus(
-        count: totalImported,
-        currentFile: 'Procesando...',
-      );
-    }
-    await AppData.refreshLibrary();
-    yield ImportStatus(count: totalImported, currentFile: 'Finalizado', completed: true);
-  }
-
-  static Stream<int> _importFolderStreamRecursive(
-    String path,
-    String targetParentId,
-  ) async* {
-    final dir = Directory(path);
+  /// Importa una carpeta recursivamente en background con reporte de progreso global.
+  static Future<void> importFolderBackground(String path, String targetParentId) async {
+    // 1. Pre-cálculo para porcentaje real
+    AppData.backgroundTaskProgress.value = const BackgroundTaskStatus(0.0, 'Analizando carpeta...');
+    int totalFiles = 0;
     try {
-      if (!await dir.exists()) return;
+      totalFiles = await _countPdfFiles(path);
     } catch (e) {
-      debugPrint("Error verificando directorio: $e");
+      debugPrint("Error contando archivos: $e");
+    }
+
+    if (totalFiles == 0) {
+      AppData.backgroundTaskProgress.value = null;
       return;
     }
 
+    // 2. Importación recursiva
+    _updateState(stage: ImportStage.processing, total: totalFiles, current: 0);
+    
+    // Wrapper class to pass integer by reference
+    final counter = _Counter();
+    
+    await _importFolderRecursiveBackground(path, targetParentId, totalFiles, counter);
+
+    // 3. Finalización
+    AppData.backgroundTaskProgress.value = const BackgroundTaskStatus(1.0, 'Finalizando importación...');
+    await AppData.refreshLibrary();
+    
+    _updateState(stage: ImportStage.idle);
+    AppData.backgroundTaskProgress.value = null;
+  }
+
+  static Future<int> _countPdfFiles(String path) async {
+    int count = 0;
+    final dir = Directory(path);
+    if (!await dir.exists()) return 0;
+    
+    final entities = dir.listSync(recursive: true); // Recursive list is faster for counting
+    for (final entity in entities) {
+       if (entity is File && entity.path.toLowerCase().endsWith('.pdf')) {
+         count++;
+       }
+    }
+    return count;
+  }
+
+  static Future<void> _importFolderRecursiveBackground(
+    String path, 
+    String targetParentId, 
+    int totalFiles,
+    _Counter counter
+  ) async {
+    final dir = Directory(path);
+    if (!await dir.exists()) return;
+
     final folderName = p.basename(dir.path);
-    // Crea la carpeta lógica usando AppData
+    
+    // Crear carpeta (si no es la raíz del import, aunque la UX manda el path seleccionado)
+    // En la lógica original, creaba carpeta con el nombre de la carpeta seleccionada.
     final newFolderId = await AppData.createFolder(
-      name: folderName,
-      parentId: targetParentId,
-      refresh: false,
+       name: folderName,
+       parentId: targetParentId,
+       refresh: false,
     );
 
     try {
       final entities = dir.listSync(recursive: false);
       for (final entity in entities) {
-        try {
-          bool isFile = (entity is File);
-          if (!isFile && FileSystemEntity.typeSync(entity.path) == FileSystemEntityType.file) isFile = true;
+        if (entity is File && entity.path.toLowerCase().endsWith('.pdf')) {
+           final fileName = p.basename(entity.path).replaceAll('.pdf', '');
+           
+           counter.val++;
+           AppData.backgroundTaskProgress.value = BackgroundTaskStatus(
+             counter.val / totalFiles, 
+             'Importando $fileName (${counter.val}/$totalFiles)...'
+           );
 
-          if (isFile) {
-            if (entity.path.toLowerCase().endsWith('.pdf')) {
-              final fileName = p.basename(entity.path).replaceAll('.pdf', '');
-              
-              await importPdfFromExternalPath(
+           try {
+             await importPdfFromExternalPath(
                 sourcePath: entity.path,
                 desiredTitle: fileName,
                 targetFolderId: newFolderId,
-                refresh: false,
-              );
-              
-              yield 1; // Contamos 1 archivo
-              await Future.delayed(Duration.zero);
-            }
-          } else if (entity is Directory) {
-            final name = p.basename(entity.path);
-            if (!name.startsWith('.')) {
-              yield* _importFolderStreamRecursive(entity.path, newFolderId);
-            }
-          }
-        } catch (e) {
-          debugPrint("Error importando ítem ${entity.path}: $e");
+                refresh: false
+             );
+           } catch (e) {
+             debugPrint("Error importando $fileName: $e");
+           }
+           
+           // Yield to UI
+           await Future.delayed(Duration.zero);
+           
+        } else if (entity is Directory) {
+           final name = p.basename(entity.path);
+           if (!name.startsWith('.')) {
+             await _importFolderRecursiveBackground(entity.path, newFolderId, totalFiles, counter);
+           }
         }
       }
     } catch (e) {
-      debugPrint("Error listando carpeta $path: $e");
+      debugPrint("Error procesando carpeta $path: $e");
     }
   }
+}
+
+class _Counter {
+  int val = 0;
 }

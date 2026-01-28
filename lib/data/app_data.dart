@@ -35,6 +35,12 @@ class AppData {
   static final ValueNotifier<ImportState> importState = ValueNotifier(const ImportState());
   static final ValueNotifier<int> libraryRevision = ValueNotifier<int>(0);
   static final ValueNotifier<int> setlistsRevision = ValueNotifier<int>(0);
+  
+  // Progress Global
+  static final ValueNotifier<BackgroundTaskStatus?> backgroundTaskProgress = ValueNotifier<BackgroundTaskStatus?>(null);
+
+  // Navigation Control
+  static final ValueNotifier<int> navigationResetTrigger = ValueNotifier<int>(0);
 
   // Cache en Memoria (Source of Truth para la UI)
   static final List<Score> library = <Score>[];
@@ -136,6 +142,8 @@ class AppData {
 
   static void _notifyLibrary() => libraryRevision.value++;
   static void _notifySetlists() => setlistsRevision.value++;
+  
+  static void triggerNavigationReset() => navigationResetTrigger.value++;
 
   // --- ID GENERATORS ---
   static int _seq = 0;
@@ -182,27 +190,138 @@ class AppData {
   // Redireccionan a los Repositorios correspondientes.
   // ===========================================================================
 
-  // --- LIBRARY REPOSITORY ---
-  static Future<String> createFolder({required String name, required String parentId, bool refresh = true}) =>
-      LibraryRepository.createFolder(name: name, parentId: parentId, refresh: refresh);
-  
-  static Future<void> updateScoreMetadata(String docId, String newTitle, String newAuthor) =>
-      LibraryRepository.updateScoreMetadata(docId: docId, newTitle: newTitle, newAuthor: newAuthor);
+  // ===========================================================================
+  // HELPER METHODS FOR LOCAL STATE MUTATION (OPTIMIZATION)
+  // ===========================================================================
 
-  static Future<void> renameScore(String docId, String newTitle) =>
-      LibraryRepository.renameScore(docId, newTitle);
+  static void _addFolderLocal(Folder f) {
+    folders.add(f);
+    _foldersById[f.id] = f;
+  }
+
+  static void _updateFolderLocal(Folder f) {
+    // Replace in list
+    final idx = folders.indexWhere((item) => item.id == f.id);
+    if (idx != -1) folders[idx] = f;
+    // Replace in map
+    _foldersById[f.id] = f;
+  }
+
+  // _removeFolderLocal unused
+
+  // _addScoreLocal unused
+
+  static void _updateScoreLocal(Score s) {
+     final idx = library.indexWhere((item) => item.docId == s.docId);
+     if (idx != -1) library[idx] = s;
+     _scoresById[s.docId] = s;
+  }
+
+  static void _removeScoreLocal(String id) {
+    library.removeWhere((s) => s.docId == id);
+    _scoresById.remove(id);
+  }
+
+  // ===========================================================================
+  // ACTION DELEGATES (FACHADA)
+  // Redireccionan a los Repositorios correspondientes.
+  // ===========================================================================
+
+  // --- LIBRARY REPOSITORY ---
+  
+  static Future<String> createFolder({required String name, required String parentId, bool refresh = true}) async {
+    // 1. DB Operation (returns Folder object)
+    final newFolder = await LibraryRepository.createFolder(name: name, parentId: parentId);
     
-  static Future<void> renameFolder(String folderId, String newName) =>
-      LibraryRepository.renameFolder(folderId, newName);
+    // 2. Local Update
+    _addFolderLocal(newFolder);
+    _notifyLibrary();
+    
+    return newFolder.id;
+  }
   
-  static Future<void> moveItems({required List<String> docIds, required List<String> folderIds, required String targetParentId}) =>
-      LibraryRepository.moveItems(docIds: docIds, folderIds: folderIds, targetParentId: targetParentId);
+  static bool folderNameExists(String name, String parentId) => 
+      LibraryRepository.folderNameExists(name, parentId);
   
-  static Future<void> deleteItems({required List<String> docIds, required List<String> folderIds}) =>
-      LibraryRepository.deleteItems(docIds: docIds, folderIds: folderIds);
+  static Future<void> updateScoreMetadata(String docId, String newTitle, String newAuthor) async {
+    final updatedScore = await LibraryRepository.updateScoreMetadata(docId: docId, newTitle: newTitle, newAuthor: newAuthor);
+    if (updatedScore != null) {
+      _updateScoreLocal(updatedScore);
+      _notifyLibrary();
+    }
+  }
+
+  static Future<void> renameScore(String docId, String newTitle) async {
+    final updatedScore = await LibraryRepository.renameScore(docId, newTitle);
+    if (updatedScore != null) {
+       _updateScoreLocal(updatedScore);
+       _notifyLibrary();
+    }
+  }
+    
+  static Future<void> renameFolder(String folderId, String newName) async {
+    final updatedFolder = await LibraryRepository.renameFolder(folderId, newName);
+    if (updatedFolder != null) {
+      _updateFolderLocal(updatedFolder);
+      _notifyLibrary();
+    }
+  }
   
-  static Future<void> deleteScore(String docId, {bool refresh = true}) =>
-      LibraryRepository.deleteScore(docId, refresh: refresh);
+  static Future<void> moveItems({required List<String> docIds, required List<String> folderIds, required String targetParentId}) async {
+    await LibraryRepository.moveItems(docIds: docIds, folderIds: folderIds, targetParentId: targetParentId);
+    
+    // Manual hydration for move
+    // It's cheaper to just update the fields locally than re-fetch all
+    for (final docId in docIds) {
+      final old = _scoresById[docId];
+      if (old != null) {
+        // Score is immutable, must replace
+        final newS = Score(
+           docId: old.docId, 
+           title: old.title, 
+           author: old.author, 
+           filePath: old.filePath, 
+           folderId: targetParentId // Updated
+        );
+        _updateScoreLocal(newS);
+      }
+    }
+    
+    for (final fId in folderIds) {
+      final old = _foldersById[fId];
+      if (old != null) {
+        final newF = Folder(
+           id: old.id, 
+           name: old.name, 
+           position: old.position, 
+           parentId: targetParentId == 'root' ? null : targetParentId
+        );
+        _updateFolderLocal(newF);
+      }
+    }
+    
+    _notifyLibrary();
+  }
+  
+  static Future<void> deleteItems({required List<String> docIds, required List<String> folderIds}) async {
+    backgroundTaskProgress.value = const BackgroundTaskStatus(0.0, 'Eliminando items...');
+    try {
+      await LibraryRepository.deleteItems(docIds: docIds, folderIds: folderIds);
+      // Simulating progress or just indefinite? 
+      // Repository call is one-shot. 
+      // User wants feedback. The spinner is good, but text is strictly requested "Misma logica...".
+      // Since we don't know progress inside repo, we just show "Eliminando..."
+      await refreshLibrary();
+    } finally {
+      backgroundTaskProgress.value = null;
+    }
+  }
+  
+  static Future<void> deleteScore(String docId, {bool refresh = true}) async {
+    await LibraryRepository.deleteScore(docId);
+    _removeScoreLocal(docId);
+    if (refresh) _notifyLibrary(); 
+  }
   
   static String uniqueTitle(String desiredTitle) => 
       LibraryRepository.uniqueTitle(desiredTitle);
@@ -220,11 +339,10 @@ class AppData {
   static Future<void> importBatchBackground(List<String> filePaths, String targetFolderId) => 
       ImportRepository.importBatchBackground(filePaths, targetFolderId);
   
-  static Stream<ImportStatus> importBatchStream(List<String> filePaths, String targetFolderId) => 
-      ImportRepository.importBatchStream(filePaths, targetFolderId);
+
   
-  static Stream<ImportStatus> importFolderStream(String path, String targetParentId) => 
-      ImportRepository.importFolderStream(path, targetParentId);
+  static Future<void> importFolderBackground(String path, String targetParentId) => 
+      ImportRepository.importFolderBackground(path, targetParentId);
 
   // --- SETLIST REPOSITORY ---
   static String uniqueSetlistName(String desiredName) => SetlistRepository.uniqueSetlistName(desiredName);
@@ -271,4 +389,13 @@ class AppData {
   static Future<int> getPagesCountForPath(String path) => LibraryRepository.getPagesCountForPath(path);
   static int getLastPageForDocId(String docId) => LibraryRepository.getLastPageForDocId(docId);
   static void setLastPageForDocId(String docId, int page) => LibraryRepository.setLastPageForDocId(docId, page);
+}
+
+class BackgroundTaskStatus {
+  final double progress; // 0.0 - 1.0
+  final String message;
+  
+  const BackgroundTaskStatus(this.progress, this.message);
+  
+  String get percentage => '${(progress * 100).toInt()}%';
 }

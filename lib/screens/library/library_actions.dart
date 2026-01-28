@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../data/app_data.dart';
 import '../../models/setlist.dart';
 import '../../widgets/score_import_logic.dart';
+import '../../widgets/rename_folder_dialog.dart';
 import 'folder_picker_screen.dart';
 
 /// Clase utilitaria estática para manejar las acciones de negocio de la Biblioteca.
@@ -122,28 +123,11 @@ class LibraryActions {
     final folder = AppData.getFolderById(folderId);
     if (folder == null) return;
     
-    final controller = TextEditingController(text: folder.name);
-
     final newName = await showDialog<String>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Renombrar carpeta'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          textCapitalization: TextCapitalization.sentences,
-          decoration: const InputDecoration(hintText: 'Nuevo nombre'),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx), 
-            child: const Text('Cancelar')
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, controller.text), 
-            child: const Text('Renombrar')
-          ),
-        ],
+      builder: (ctx) => RenameFolderDialog(
+        folderId: folderId,
+        initialName: folder.name,
       ),
     );
 

@@ -66,8 +66,8 @@ class DocStateTable extends Table {
 }
 
 class AnnotationStrokesTable extends Table {
-  @override
-  String get tableName => 'annotation_strokes';
+  // @override
+  // String get tableName => 'annotation_strokes';
 
   TextColumn get id => text()();
   TextColumn get docId => text()();
@@ -101,19 +101,16 @@ LazyDatabase _openConnection([File? customFile]) {
   tables: [DocsTable, SetlistsTable, SetlistItemsTable, DocStateTable, FoldersTable, AnnotationStrokesTable],
 )
 class AppDatabase extends _$AppDatabase {
-  // CAMBIO: Usamos _openConnection en lugar de driftDatabase(...)
-  AppDatabase({File? customFile}) : super(_openConnection(customFile));
+  // CAMBIO: Constructor flexible para permitir testing (in-memory) o uso normal (disco)
+  AppDatabase({QueryExecutor? executor, File? customFile}) : super(executor ?? _openConnection(customFile));
 
   @override
-  int get schemaVersion => 2; // We are not bumping version technically because we want to map to existing invalid-schema table, but usually we should bump.
-  // Given user didn't ask for migration logic, we assume the table exists from previous 'customStatement' or will be created by 'createAll' for new users.
+  int get schemaVersion => 3; 
 
-  
   @override
   MigrationStrategy get migration => MigrationStrategy(
         onCreate: (Migrator m) async {
           await m.createAll();
-          // await _createAnnotationsTableIfNeeded(); // Drift now processes this via createAll
           await _ensureRootFolderExists();
         },
         onUpgrade: (Migrator m, int from, int to) async {
@@ -122,13 +119,9 @@ class AppDatabase extends _$AppDatabase {
             await _ensureRootFolderExists();
             await customStatement("UPDATE docs_table SET folder_id = 'root' WHERE folder_id IS NULL");
           }
-           // if (from < 3) { await m.createTable(annotationStrokesTable); } // Assuming we bump version or just rely on existing
-           // Since we already used customStatement to create it in previous versions, we don't need to do anything if it exists.
-           // However, if we want to be safe:
-           // await m.createTable(annotationStrokesTable); // This might fail if exists.
-           // Better to let it be, or use 'createTable' with ifNotExists check (Drift doesn't strictly support ifNotExists in createTable directly usually without hacking, but createAll does).
-           
-           // We removed _createAnnotationsTableIfNeeded calls.
+           if (from < 3) {
+             await m.createTable(annotationStrokesTable);
+           }
         },
         beforeOpen: (details) async {
           await customStatement('PRAGMA foreign_keys = ON');

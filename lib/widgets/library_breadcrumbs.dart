@@ -78,7 +78,9 @@ class LibraryBreadcrumbs extends StatelessWidget {
                           style: TextStyle(
                             fontSize: 18, // Tamaño un poco más grande para el título
                             fontWeight: isLast ? FontWeight.bold : FontWeight.normal,
-                            color: isLast ? Colors.black : Colors.grey[700],
+                            color: isLast 
+                                ? Theme.of(context).colorScheme.onSurface 
+                                : Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
                           ),
                         ),
                       ),

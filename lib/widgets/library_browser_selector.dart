@@ -65,17 +65,14 @@ class LibraryBrowserSelector extends StatelessWidget {
       builder: (context, revision, _) {
         
         // 1. CARPETAS
-        // Las carpetas suelen ser pocas (decenas), ordenarlas aquí es barato.
-        // Mantenemos el sort local para asegurar orden alfabético visual.
+        // Las carpetas suelen ser pocas, pero mantenemos sort local para orden visual.
         final visibleFolders = AppData.folders
             .where((f) => (f.parentId ?? 'root') == currentFolderId)
             .toList()
             ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
 
-        // 2. PARTITURAS (OPTIMIZACIÓN CLAVE)
-        // Usamos la lista GLOBAL ya ordenada desde el caché de AppData.
-        // Al filtrar una lista ordenada, el subconjunto mantiene el orden.
-        // Eliminamos el costo de ordenar cientos de items en cada render.
+        // 2. PARTITURAS
+        // Usamos la lista GLOBAL ya ordenada desde caché.
         List<Score> visibleDocs = [];
         if (showScores) {
           final allSorted = AppData.getLibrarySortedByTitle();
@@ -96,14 +93,30 @@ class LibraryBrowserSelector extends StatelessWidget {
           );
         }
 
-        return ListView(
-          padding: const EdgeInsets.only(bottom: 80),
-          children: [
+        // OPTIMIZACIÓN: CustomScrollView + Slivers para renderizado lazy (ListView.builder)
+        return CustomScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          slivers: [
             // --- SECCIÓN CARPETAS ---
-            ...visibleFolders.map((f) => _buildFolderTile(context, f)),
+            if (visibleFolders.isNotEmpty)
+              SliverList(
+                delegate: SliverChildBuilderDelegate(
+                  (context, index) => _buildFolderTile(context, visibleFolders[index]),
+                  childCount: visibleFolders.length,
+                ),
+              ),
 
             // --- SECCIÓN ARCHIVOS ---
-            ...visibleDocs.map((doc) => _buildScoreTile(context, doc)),
+            if (visibleDocs.isNotEmpty)
+              SliverList(
+                delegate: SliverChildBuilderDelegate(
+                  (context, index) => _buildScoreTile(context, visibleDocs[index]),
+                  childCount: visibleDocs.length,
+                ),
+              ),
+
+            // Padding final para que el FAB no tape el último elemento
+            const SliverPadding(padding: EdgeInsets.only(bottom: 80)),
           ],
         );
       },

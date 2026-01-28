@@ -124,9 +124,8 @@ class ScopedSearchDelegate extends SearchDelegate<dynamic> {
               Navigator.of(context).push(
                 MaterialPageRoute(
                   builder: (_) => PdfViewerScreen(
-                    docId: s.docId,
-                    title: s.title,
-                    filePath: s.filePath ?? '',
+                    sourceScores: matchedScores,
+                    initialIndex: matchedScores.indexOf(s),
                   ),
                 ),
               );

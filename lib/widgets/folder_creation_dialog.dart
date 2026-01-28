@@ -12,10 +12,18 @@ class FolderCreationDialog extends StatefulWidget {
 
 class _FolderCreationDialogState extends State<FolderCreationDialog> {
   final _controller = TextEditingController();
+  String? _errorText;
 
   Future<void> _create() async {
     final name = _controller.text.trim();
     if (name.isNotEmpty) {
+      if (AppData.folderNameExists(name, widget.parentId)) {
+         setState(() {
+           _errorText = 'Esta carpeta ya existe';
+         });
+         return;
+      }
+
       await AppData.createFolder(name: name, parentId: widget.parentId);
       if (mounted) Navigator.of(context).pop(true);
     }
@@ -28,8 +36,16 @@ class _FolderCreationDialogState extends State<FolderCreationDialog> {
       content: TextField(
         controller: _controller,
         autofocus: true,
-        decoration: const InputDecoration(labelText: 'Nombre'),
+        decoration: InputDecoration(
+          labelText: 'Nombre',
+          errorText: _errorText,
+        ),
         textCapitalization: TextCapitalization.sentences,
+        onChanged: (_) {
+          if (_errorText != null) {
+            setState(() => _errorText = null);
+          }
+        },
         onSubmitted: (_) => _create(),
       ),
       actions: [

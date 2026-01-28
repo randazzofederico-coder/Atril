@@ -34,6 +34,23 @@ class _LibraryScreenState extends State<LibraryScreen> {
     if (widget.initialFolderId != null) {
       _currentFolderId = widget.initialFolderId!;
     }
+    
+    // Listen for reset signals (e.g. after Restore Backup)
+    AppData.navigationResetTrigger.addListener(_handleResetSignal);
+  }
+  
+  @override
+  void dispose() {
+    AppData.navigationResetTrigger.removeListener(_handleResetSignal);
+    super.dispose();
+  }
+  
+  void _handleResetSignal() {
+    if (!mounted) return;
+    setState(() {
+      _historyStack.clear();
+      _currentFolderId = 'root';
+    });
   }
 
   // ---------------------------------------------------------------------------
@@ -268,14 +285,17 @@ class _LibraryScreenState extends State<LibraryScreen> {
                 onFolderTap: _pushHistoryAndNavigate,
                 
                 onDocTap: (docId) {
-                   final doc = AppData.getScoreById(docId);
-                   if (doc != null) {
+                   // Calculate context list for navigation
+                   final allSorted = AppData.getLibrarySortedByTitle();
+                   final folderDocs = allSorted.where((s) => s.folderId == _currentFolderId).toList();
+                   final index = folderDocs.indexWhere((s) => s.docId == docId);
+                   
+                   if (index != -1) {
                      Navigator.push(
                        context, 
                        MaterialPageRoute(builder: (context) => PdfViewerScreen(
-                         docId: doc.docId,
-                         title: doc.title,
-                         filePath: doc.filePath ?? '',
+                         sourceScores: folderDocs,
+                         initialIndex: index,
                        ))
                      );
                    }

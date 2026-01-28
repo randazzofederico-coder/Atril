@@ -4,6 +4,7 @@ import 'setlists/create_setlist_screen.dart';
 import 'library/library_screen.dart';
 import 'setlists/setlists_screen.dart';
 import 'settings/settings_screen.dart';
+import '../data/app_data.dart';
 
 class HomeShell extends StatefulWidget {
   const HomeShell({super.key});
@@ -68,17 +69,53 @@ class _HomeShellState extends State<HomeShell> {
         index: _index,
         children: pages,
       ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _index,
-        onDestinationSelected: (i) => setState(() => _index = i),
-        destinations: const [
-          NavigationDestination(
-            icon: Icon(Icons.library_music),
-            label: 'Biblioteca',
+      bottomNavigationBar: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Global Progress
+          ValueListenableBuilder<BackgroundTaskStatus?>(
+            valueListenable: AppData.backgroundTaskProgress,
+            builder: (context, status, _) {
+               if (status == null) return const SizedBox.shrink();
+               return Column(
+                 mainAxisSize: MainAxisSize.min,
+                 crossAxisAlignment: CrossAxisAlignment.stretch,
+                 children: [
+                   LinearProgressIndicator(value: status.progress, minHeight: 4),
+                   Container(
+                     color: Theme.of(context).colorScheme.surfaceContainer,
+                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                     child: Row(
+                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                       children: [
+                         Text(
+                           status.message,
+                           style: Theme.of(context).textTheme.bodySmall,
+                         ),
+                         Text(
+                           status.percentage,
+                           style: Theme.of(context).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.bold),
+                         ),
+                       ],
+                     ),
+                   ),
+                 ],
+               );
+            },
           ),
-          NavigationDestination(
-            icon: Icon(Icons.queue_music),
-            label: 'Setlists',
+          NavigationBar(
+            selectedIndex: _index,
+            onDestinationSelected: (i) => setState(() => _index = i),
+            destinations: const [
+              NavigationDestination(
+                icon: Icon(Icons.library_music),
+                label: 'Biblioteca',
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.queue_music),
+                label: 'Setlists',
+              ),
+            ],
           ),
         ],
       ),

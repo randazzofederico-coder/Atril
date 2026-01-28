@@ -199,10 +199,10 @@ class _SetlistDetailScreenState extends State<SetlistDetailScreen> {
                       padding: listPadding,
                       itemCount: scores.length,
                       itemBuilder: (context, index) {
-                        final score = scores[index];
+                        // final score = scores[index]; // Unused
                         return _ViewScoreTile(
                           index: index,
-                          score: score,
+                          sourceScores: scores,
                         );
                       },
                     ),
@@ -245,15 +245,16 @@ class _EmptyState extends StatelessWidget {
 
 class _ViewScoreTile extends StatelessWidget {
   final int index;
-  final Score score;
+  final List<Score> sourceScores;
 
   const _ViewScoreTile({
     required this.index,
-    required this.score,
+    required this.sourceScores,
   });
 
   @override
   Widget build(BuildContext context) {
+    final score = sourceScores[index];
     final hasPdf = (score.filePath != null && score.filePath!.isNotEmpty);
 
     return Card(
@@ -271,9 +272,8 @@ class _ViewScoreTile extends StatelessWidget {
                 Navigator.of(context).push(
                   MaterialPageRoute(
                     builder: (_) => PdfViewerScreen(
-                      docId: score.docId,
-                      title: score.title,
-                      filePath: score.filePath!,
+                      sourceScores: sourceScores,
+                      initialIndex: index,
                     ),
                   ),
                 );

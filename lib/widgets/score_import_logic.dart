@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'dart:io';
 import '../data/app_data.dart';
-import 'import_progress_dialog.dart';
 
 class ScoreImportLogic {
   
@@ -86,24 +85,19 @@ class ScoreImportLogic {
       return;
     }
 
-    // Para carpetas mantenemos el diálogo modal por ahora, ya que la lógica recursiva
-    // está implementada con Streams y puede ser muy pesada para background sin cambios profundos.
-    // Desactivamos la barra superior para no duplicar feedback.
+    // 4. INICIAR IMPORTACIÓN EN "BACKGROUND"
+    // Ya no mostramos diálogo bloqueante, usamos la barra global.
     AppData.importState.value = const ImportState(stage: ImportStage.idle);
 
-    final stream = AppData.importFolderStream(path, targetFolderId);
-    if (context.mounted) {
-      final resultCount = await showDialog<int>(
-        context: context,
-        barrierDismissible: false,
-        builder: (_) => ImportProgressDialog(importStream: stream),
-      );
+    AppData.importFolderBackground(path, targetFolderId).catchError((e) {
+      debugPrint("Error en background folder import: $e");
+      AppData.importState.value = const ImportState(stage: ImportStage.idle);
+    });
 
-      if (context.mounted && resultCount != null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Importación completada: $resultCount archivos.')),
-        );
-      }
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Importación de carpeta iniciada en segundo plano...')),
+      );
     }
   }
 }
