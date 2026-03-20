@@ -19,6 +19,9 @@ class DocsTable extends Table {
 
   IntColumn get createdAt => integer()();
   IntColumn get updatedAt => integer()();
+
+  BoolColumn get isDeleted => boolean().withDefault(const Constant(false))();
+  IntColumn get deletedAt => integer().nullable()();
   @override
   Set<Column<Object>> get primaryKey => {id};
 }
@@ -31,6 +34,9 @@ class FoldersTable extends Table {
 
   IntColumn get createdAt => integer()();
   IntColumn get updatedAt => integer()();
+
+  BoolColumn get isDeleted => boolean().withDefault(const Constant(false))();
+  IntColumn get deletedAt => integer().nullable()();
   @override
   Set<Column<Object>> get primaryKey => {id};
 }
@@ -105,7 +111,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase({QueryExecutor? executor, File? customFile}) : super(executor ?? _openConnection(customFile));
 
   @override
-  int get schemaVersion => 3; 
+  int get schemaVersion => 4; 
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -121,6 +127,12 @@ class AppDatabase extends _$AppDatabase {
           }
            if (from < 3) {
              await m.createTable(annotationStrokesTable);
+           }
+           if (from < 4) {
+             await m.addColumn(docsTable, docsTable.isDeleted);
+             await m.addColumn(docsTable, docsTable.deletedAt);
+             await m.addColumn(foldersTable, foldersTable.isDeleted);
+             await m.addColumn(foldersTable, foldersTable.deletedAt);
            }
         },
         beforeOpen: (details) async {
@@ -152,6 +164,8 @@ class AppDatabase extends _$AppDatabase {
     required String author,
     required String internalRelPath,
     String? folderId,
+    bool isDeleted = false,
+    int? deletedAt,
   }) async {
     final now = DateTime.now().millisecondsSinceEpoch;
     await into(docsTable).insertOnConflictUpdate(
@@ -163,12 +177,39 @@ class AppDatabase extends _$AppDatabase {
         folderId: Value(folderId ?? 'root'),
         createdAt: now,
         updatedAt: now,
+        isDeleted: Value(isDeleted),
+        deletedAt: Value(deletedAt),
       ),
     );
   }
 
   Future<void> deleteDocById(String docId) async {
     await (delete(docsTable)..where((t) => t.id.equals(docId))).go();
+  }
+
+  // --- TRASH / SOFT DELETE DOCS ---
+
+  Future<void> softDeleteDoc(String docId) async {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    await (update(docsTable)..where((t) => t.id.equals(docId))).write(
+      DocsTableCompanion(
+        isDeleted: const Value(true),
+        deletedAt: Value(now),
+      ),
+    );
+  }
+
+  Future<void> restoreDoc(String docId) async {
+    await (update(docsTable)..where((t) => t.id.equals(docId))).write(
+      const DocsTableCompanion(
+        isDeleted: Value(false),
+        deletedAt: Value(null),
+      ),
+    );
+  }
+
+  Future<List<DocsTableData>> getDeletedDocs() {
+     return (select(docsTable)..where((t) => t.isDeleted.equals(true))).get();
   }
 
   Future<void> deleteDocStateByDocId(String docId) async {
@@ -188,6 +229,8 @@ class AppDatabase extends _$AppDatabase {
     required String name,
     String? parentId,
     required int position,
+    bool isDeleted = false,
+    int? deletedAt,
   }) async {
     final now = DateTime.now().millisecondsSinceEpoch;
     await into(foldersTable).insertOnConflictUpdate(
@@ -198,6 +241,8 @@ class AppDatabase extends _$AppDatabase {
         position: position,
         createdAt: now,
         updatedAt: now,
+        isDeleted: Value(isDeleted),
+        deletedAt: Value(deletedAt),
       ),
     );
   }
@@ -207,17 +252,46 @@ class AppDatabase extends _$AppDatabase {
     required String name,
     String? parentId,
     int position = 0,
+    bool isDeleted = false,
+    int? deletedAt,
   }) async {
     return upsertFolder(
       id: id,
       name: name,
       parentId: parentId,
       position: position,
+      isDeleted: isDeleted,
+      deletedAt: deletedAt,
     );
   }
 
   Future<void> deleteFolder(String folderId) async {
     await (delete(foldersTable)..where((t) => t.id.equals(folderId))).go();
+  }
+
+  // --- TRASH / SOFT DELETE FOLDERS ---
+
+  Future<void> softDeleteFolder(String folderId) async {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    await (update(foldersTable)..where((t) => t.id.equals(folderId))).write(
+      FoldersTableCompanion(
+        isDeleted: const Value(true),
+        deletedAt: Value(now),
+      ),
+    );
+  }
+
+  Future<void> restoreFolder(String folderId) async {
+    await (update(foldersTable)..where((t) => t.id.equals(folderId))).write(
+      const FoldersTableCompanion(
+        isDeleted: Value(false),
+        deletedAt: Value(null),
+      ),
+    );
+  }
+
+  Future<List<FoldersTableData>> getDeletedFolders() {
+    return (select(foldersTable)..where((t) => t.isDeleted.equals(true))).get();
   }
 
   // ---------------------------------------------------------------------------

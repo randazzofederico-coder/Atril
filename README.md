@@ -5,6 +5,7 @@ Atril Digital is a robust Flutter application designed for musicians to manage, 
 ## ✨ Key Features
 
 - **Sheet Music Library**: Infinite nesting of folders, search, and full file management (rename, move, delete).
+- **Recycle Bin (Trash)**: Safety first. Deleted items can be restored within 30 days. Accessible from Settings.
 - **Advanced PDF Reader**: Fast rendering engine with vertical scroll, page scrubbing, and seamless navigation between setlist items.
 - **Photo Scanner (Camera to PDF)**:
   - Capture or import multiple pages.

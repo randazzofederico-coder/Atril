@@ -202,61 +202,148 @@ class LibraryRepository {
     required List<String> folderIds,
     Function(int)? onProgress,
   }) async {
-    int deletedCount = 0;
+    int count = 0;
     void tick() {
-      deletedCount++;
-      if (onProgress != null) onProgress(deletedCount);
+      count++;
+      if (onProgress != null) onProgress(count);
     }
 
     for (final id in docIds) {
-      await deleteScore(id);
+      await AppData.db.softDeleteDoc(id);
       tick();
     }
     for (final id in folderIds) {
-      await _deleteFolderRecursive(id, onProgress: tick);
+      await _softDeleteFolderRecursive(id, onProgress: tick);
     }
-    // NOTA: El llamador es responsable de refrescar.
   }
 
-  static Future<void> _deleteFolderRecursive(String folderId, {required Function() onProgress}) async {
-    // Borrar subcarpetas
+  static Future<void> _softDeleteFolderRecursive(String folderId, {required Function() onProgress}) async {
+    // Soft-delete subfolders
     final childrenF = AppData.folders.where((f) => f.parentId == folderId).toList();
     for (final child in childrenF) {
-      await _deleteFolderRecursive(child.id, onProgress: onProgress);
+      await _softDeleteFolderRecursive(child.id, onProgress: onProgress);
     }
-    // Borrar docs dentro
+    // Soft-delete docs
     final childrenD = AppData.library.where((d) => d.folderId == folderId).toList();
     for (final doc in childrenD) {
-      await deleteScore(doc.docId);
+      await AppData.db.softDeleteDoc(doc.docId);
       onProgress();
     }
-    // Borrar la carpeta en sí
+    // Soft-delete the folder itself
+    await AppData.db.softDeleteFolder(folderId);
+    onProgress();
+  }
+
+  // --- RESTORE ---
+
+  static Future<void> restoreItems({
+    required List<String> docIds, 
+    required List<String> folderIds,
+    Function(int)? onProgress,
+  }) async {
+    int count = 0;
+    void tick() {
+      count++;
+      if (onProgress != null) onProgress(count);
+    }
+
+    for (final id in docIds) {
+      await AppData.db.restoreDoc(id);
+      tick();
+    }
+    for (final id in folderIds) {
+      await _restoreFolderRecursive(id, onProgress: tick);
+    }
+  }
+
+  static Future<void> _restoreFolderRecursive(String folderId, {required Function() onProgress}) async {
+    // Need to restoration based on what's in DB because memory currentLibrary only has non-deleted
+    final dbFolders = await AppData.db.getDeletedFolders();
+    final childrenF = dbFolders.where((f) => f.parentId == folderId).toList();
+    for (final child in childrenF) {
+      await _restoreFolderRecursive(child.id, onProgress: onProgress);
+    }
+
+    final dbDocs = await AppData.db.getDeletedDocs();
+    final childrenD = dbDocs.where((d) => d.folderId == folderId).toList();
+    for (final doc in childrenD) {
+      await AppData.db.restoreDoc(doc.id);
+      onProgress();
+    }
+    await AppData.db.restoreFolder(folderId);
+    onProgress();
+  }
+
+  // --- PERMANENT DELETE ---
+
+  static Future<void> permanentlyDeleteItems({
+    required List<String> docIds,
+    required List<String> folderIds,
+    Function(int)? onProgress,
+  }) async {
+     int count = 0;
+     void tick() {
+      count++;
+      if (onProgress != null) onProgress(count);
+    }
+
+    for (final id in docIds) {
+      await permanentlyDeleteScore(id);
+      tick();
+    }
+    
+    // For folders, we need to find all scores inside before deleting
+    for (final fId in folderIds) {
+       await _permanentlyDeleteFolderRecursive(fId, onProgress: tick);
+    }
+  }
+
+  static Future<void> _permanentlyDeleteFolderRecursive(String folderId, {required Function() onProgress}) async {
+    // 1. Permanently delete scores and subfolders from DB viewpoint
+    final allDocs = await AppData.db.getAllDocs(); 
+    final docsInFolder = allDocs.where((d) => d.folderId == folderId).toList();
+    for (final d in docsInFolder) {
+      await permanentlyDeleteScore(d.id);
+      onProgress();
+    }
+
+    final allFolders = await AppData.db.getAllFolders();
+    final subs = allFolders.where((f) => f.parentId == folderId).toList();
+    for (final s in subs) {
+      await _permanentlyDeleteFolderRecursive(s.id, onProgress: onProgress);
+    }
+
+    // 2. Clear Folder itself
     await AppData.db.deleteFolder(folderId);
     onProgress();
   }
 
-  static Future<void> deleteScore(String docId) async {
-    final score = AppData.getScoreById(docId);
-    if (score == null) return;
+  static Future<void> permanentlyDeleteScore(String docId) async {
+    // The previous implementation of deleteScore
+    final dbDocs = await AppData.db.getAllDocs();
+    final dData = dbDocs.where((d) => d.id == docId).firstOrNull;
+    if (dData == null) return;
 
     // 1. Limpiar referencias en Setlists
-    final changedSetlists = <Setlist>[];
-    for (final s in AppData.setlists) {
-      if (s.docIds.contains(docId)) {
-        s.docIds.removeWhere((id) => id == docId);
-        changedSetlists.add(s);
-      }
-    }
-
     await AppData.db.deleteSetlistItemsByDocId(docId);
-    for (final s in changedSetlists) {
-      await AppData.db.replaceSetlistItems(setlistId: s.setlistId, orderedDocIds: s.docIds);
-    }
+    // Nota: El setlistId de la memoria puede estar desactualizado si no refrescamos, 
+    // pero hydrateAll() en AppData reconstruye esto.
 
     // 2. Borrar datos de la partitura
     await AppData.db.deleteDocStateByDocId(docId);
     await AppData.db.deleteDocById(docId);
-    await AppData.storage.deleteDocFile(docId);
+    
+    // Obtenemos path absoluto para borrar archivo físico
+    final absPath = AppData.storage.absPathFromRelPath(dData.internalRelPath);
+    final file = File(absPath);
+    if (await file.exists()) {
+      await file.delete();
+    }
+  }
+
+  @Deprecated('Use permanentlyDeleteScore instead')
+  static Future<void> deleteScore(String docId) async {
+    await AppData.db.softDeleteDoc(docId);
   }
 
   // ---------------------------------------------------------------------------

@@ -74,7 +74,23 @@ class AppData {
   static Future<void> _initInternal() async {
     await settings.init();
     await storage.init();
+    await _performAutoCleanup(); // Auto-cleanup old trash
     await refreshLibrary();
+  }
+
+  static Future<void> _performAutoCleanup() async {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final thirtyDaysAgo = now - (30 * 24 * 60 * 60 * 1000);
+    
+    final deletedDocs = await db.getDeletedDocs();
+    final toDeleteDocs = deletedDocs.where((d) => (d.deletedAt ?? 0) < thirtyDaysAgo).map((e) => e.id).toList();
+    
+    final deletedFolders = await db.getDeletedFolders();
+    final toDeleteFolders = deletedFolders.where((f) => (f.deletedAt ?? 0) < thirtyDaysAgo).map((e) => e.id).toList();
+
+    if (toDeleteDocs.isNotEmpty || toDeleteFolders.isNotEmpty) {
+      await LibraryRepository.permanentlyDeleteItems(docIds: toDeleteDocs, folderIds: toDeleteFolders);
+    }
   }
 
   static Future<void> refreshLibrary() async {
@@ -89,6 +105,7 @@ class AppData {
     _foldersById.clear();
     for (final f in dbFolders) {
       if (f.id == 'root') continue;
+      if (f.isDeleted) continue; // Skip deleted
       final folder = Folder(
         id: f.id,
         name: f.name,
@@ -105,6 +122,7 @@ class AppData {
     _scoresById.clear();
 
     for (final d in docs) {
+      if (d.isDeleted) continue; // Skip deleted
       final absPath = storage.absPathFromRelPath(d.internalRelPath);
       final score = Score(
         docId: d.id,
@@ -307,7 +325,7 @@ class AppData {
     // 1. Calculate total items to delete for progress
     final total = LibraryRepository.countItems(docIds: docIds, folderIds: folderIds);
     
-    backgroundTaskProgress.value = const BackgroundTaskStatus(0.0, 'Eliminando...');
+    backgroundTaskProgress.value = const BackgroundTaskStatus(0.0, 'Enviando a la papelera...');
     try {
       await LibraryRepository.deleteItems(
         docIds: docIds, 
@@ -316,8 +334,40 @@ class AppData {
           final p = total > 0 ? (completed / total) : 1.0;
           backgroundTaskProgress.value = BackgroundTaskStatus(
             p.clamp(0.0, 1.0), 
-            'Eliminando... ${(p * 100).toInt()}%'
+            'Enviando a la papelera... ${(p * 100).toInt()}%'
           );
+        }
+      );
+      await refreshLibrary();
+    } finally {
+      backgroundTaskProgress.value = null;
+    }
+  }
+
+  static Future<void> restoreItems({required List<String> docIds, required List<String> folderIds}) async {
+    backgroundTaskProgress.value = const BackgroundTaskStatus(0.0, 'Restaurando...');
+    try {
+      await LibraryRepository.restoreItems(
+        docIds: docIds, 
+        folderIds: folderIds,
+        onProgress: (completed) {
+           backgroundTaskProgress.value = BackgroundTaskStatus(0.0, 'Restaurando...');
+        }
+      );
+      await refreshLibrary();
+    } finally {
+      backgroundTaskProgress.value = null;
+    }
+  }
+
+  static Future<void> permanentlyDeleteItems({required List<String> docIds, required List<String> folderIds}) async {
+    backgroundTaskProgress.value = const BackgroundTaskStatus(0.0, 'Eliminando permanentemente...');
+    try {
+      await LibraryRepository.permanentlyDeleteItems(
+        docIds: docIds, 
+        folderIds: folderIds,
+        onProgress: (completed) {
+           backgroundTaskProgress.value = BackgroundTaskStatus(0.0, 'Eliminando...');
         }
       );
       await refreshLibrary();

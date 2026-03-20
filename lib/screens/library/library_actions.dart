@@ -166,13 +166,13 @@ class LibraryActions {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Eliminar carpeta'),
-        content: Text('¿Eliminar "${folder.name}" y TODO su contenido?\nEsta acción no se puede deshacer.'),
+        content: Text('¿Mover "${folder.name}" y su contenido a la papelera?\n\nPodrás restaurarlos desde Ajustes > Papelera.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: Colors.red),
             onPressed: () => Navigator.pop(ctx, true), 
-            child: const Text('Eliminar')
+            child: const Text('Mover a Papelera')
           ),
         ],
       ),
@@ -181,7 +181,7 @@ class LibraryActions {
     if (confirm == true) {
       await AppData.deleteItems(docIds: [], folderIds: [folderId]);
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Carpeta eliminada')));
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Carpeta movida a la papelera')));
       }
     }
   }
@@ -223,10 +223,10 @@ class LibraryActions {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Eliminar partitura'),
-        content: const Text('¿Eliminar este archivo?\nSe borrarán también sus anotaciones.'),
+        content: const Text('¿Mover este archivo a la papelera?\n\nPodrás restaurarlo desde Ajustes > Papelera.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
-          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Eliminar', style: TextStyle(color: Colors.red))),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Mover a Papelera', style: TextStyle(color: Colors.red))),
         ],
       ),
     );
@@ -252,13 +252,13 @@ class LibraryActions {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Confirmar eliminación'),
-        content: Text('¿Eliminar $count elementos seleccionados?\nLas carpetas se borrarán con todo su contenido.'),
+        title: const Text('Mover a la papelera'),
+        content: Text('¿Mover $count elementos seleccionados a la papelera?\n\nPodrás restaurarlos desde Ajustes > Papelera.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true), 
-            child: const Text('Eliminar', style: TextStyle(color: Colors.red))
+            child: const Text('Mover a Papelera', style: TextStyle(color: Colors.red))
           ),
         ],
       ),
@@ -267,7 +267,7 @@ class LibraryActions {
     if (confirm == true) {
       await AppData.deleteItems(docIds: docIds, folderIds: folderIds);
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Elementos eliminados')));
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Elementos movidos a la papelera')));
       }
       return true;
     }

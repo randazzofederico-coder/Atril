@@ -1,6 +1,6 @@
 # ARCHITECTURE.md — Atril Digital (Flutter)
 
-**Estado del Proyecto:** Consolidación — **v1.13.0 (True Homography & Scanner Optims)**
+**Estado del Proyecto:** Consolidación — **v1.14.0 (Recycle Bin & Trash Management)**
 **Fecha de Análisis:** Marzo 2026
 **Objetivo:** Importación desde cámara con rectificación proyectiva real (Homografía 3x3).
 
@@ -70,8 +70,8 @@ La base de datos (`AppDatabase`) define la estructura core:
 
 | Tabla | Descripción |
 | :--- | :--- |
-| **`DocsTable`** | Archivos PDF. metadata básica (Título, Autor, Path relativo). `folder_id` referencia al `parent`. |
-| **`FoldersTable`** | Jerarquía de carpetas. `parent_id` permite anidamiento infinito. |
+| **`DocsTable`** | Archivos PDF. metadata básica (Título, Autor, Path relativo). `folder_id` referencia al `parent`. Soporta **Soft Delete** (`isDeleted`, `deletedAt`). |
+| **`FoldersTable`** | Jerarquía de carpetas. `parent_id` permite anidamiento infinito. Soporta **Soft Delete** (`isDeleted`, `deletedAt`). |
 | **`SetlistsTable`** | Cabeceras de listas de reproducción (Nombre, Notas). |
 | **`SetlistItemsTable`** | Tabla pivote (Many-to-Many) ordenada. Vincula `Setlist` <-> `Doc`. |
 | **`AnnotationStrokesTable`** | Trazos de tinta vectoriales. Vinculados a `docId` + `pageIndex`. Opcionalmente a `setlistId` (capa no destructiva). |
@@ -100,6 +100,11 @@ La base de datos (`AppDatabase`) define la estructura core:
     * CRUD y Modo "Vivo" (navegación fluida).
 * **Gestión de Archivos:**
     * Feedback de progreso y validaciones de integridad.
+    * **Papelera de Reciclaje (Soft Delete)**:
+        * Los archivos borrados se ocultan de la interfaz principal.
+        * Restauración rápida con preservación de metadatos y anotaciones.
+        * **Auto-cleanup**: Eliminación física automática tras 30 días.
+        * Integración inteligente con backups e importaciones.
 
 ### 🔮 Próximos Pasos
 * **Nuevas Herramientas de Anotación:** Texto enriquecido, Formas geométricas, Sellos musicales.

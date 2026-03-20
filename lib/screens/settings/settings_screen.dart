@@ -2,6 +2,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import '../../data/backup_manager.dart';
 import '../../data/app_data.dart';
+import '../trash/trash_bin_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -134,6 +135,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
                 _buildSectionHeader('Datos'),
                 _buildDataSection(),
+                const Divider(),
+
+                _buildSectionHeader('Papelera'),
+                ListTile(
+                  leading: const Icon(Icons.delete_outline, color: Colors.orange),
+                  title: const Text('Ver Papelera'),
+                  subtitle: const Text('Restaurar elementos eliminados'),
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const TrashBinScreen()),
+                    );
+                  },
+                ),
                 const Divider(),
 
                 const Padding(

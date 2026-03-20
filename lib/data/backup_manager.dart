@@ -258,6 +258,8 @@ class BackupManager {
             name: f.name,
             parentId: rootImportId,
             position: f.position,
+            isDeleted: f.isDeleted,
+            deletedAt: f.deletedAt,
           );
         }
 
@@ -279,6 +281,8 @@ class BackupManager {
                  name: f.name,
                  parentId: targetParentId,
                  position: f.position,
+                 isDeleted: f.isDeleted,
+                 deletedAt: f.deletedAt,
                );
             }
         }
@@ -330,6 +334,8 @@ class BackupManager {
                author: d.author ?? '',
                internalRelPath: p.join('docs', newFilename), // Corregido: Debe incluir 'docs/'
                folderId: newFolderId,
+               isDeleted: d.isDeleted,
+               deletedAt: d.deletedAt,
              );
           } else {
             debugPrint("Advertencia: Archivo PDF no encontrado irrecuperable para doc ${d.displayName}");
