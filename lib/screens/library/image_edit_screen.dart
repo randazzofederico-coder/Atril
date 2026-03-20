@@ -2,7 +2,9 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:image/image.dart' as img;
 
 /// Holds all edit parameters so they can be restored when re-editing.
 class ImageEditParams {
@@ -11,7 +13,8 @@ class ImageEditParams {
   final double threshold;
   final double brightness;
   final double contrast;
-  final double cropLeft, cropTop, cropRight, cropBottom;
+  // Perspective crop: 4 independent corners, normalized 0..1
+  final Offset cropTL, cropTR, cropBL, cropBR;
 
   const ImageEditParams({
     this.rotation = 0,
@@ -19,17 +22,17 @@ class ImageEditParams {
     this.threshold = 128.0,
     this.brightness = 0.0,
     this.contrast = 0.0,
-    this.cropLeft = 0.0,
-    this.cropTop = 0.0,
-    this.cropRight = 1.0,
-    this.cropBottom = 1.0,
+    this.cropTL = const Offset(0, 0),
+    this.cropTR = const Offset(1, 0),
+    this.cropBL = const Offset(0, 1),
+    this.cropBR = const Offset(1, 1),
   });
 
   bool get isDefault =>
       rotation == 0 && !grayscale && threshold == 128.0 &&
       brightness == 0.0 && contrast == 0.0 &&
-      cropLeft == 0.0 && cropTop == 0.0 &&
-      cropRight == 1.0 && cropBottom == 1.0;
+      cropTL == const Offset(0, 0) && cropTR == const Offset(1, 0) &&
+      cropBL == const Offset(0, 1) && cropBR == const Offset(1, 1);
 }
 
 /// Result returned by the editor.
@@ -39,7 +42,33 @@ class ImageEditResult {
   const ImageEditResult(this.editedPath, this.params);
 }
 
-/// Image editor with Rotate, B/W, Brightness/Contrast, and Crop tools.
+/// Params passed to the background island for heavy image processing.
+class _PerspectiveProcessParams {
+  final String sourcePath;
+  final String tempPath;
+  final int srcW, srcH;
+  final int rotation;
+  final bool grayscale;
+  final double threshold;
+  final double brightness;
+  final double contrast;
+  final Offset cropTL, cropTR, cropBL, cropBR;
+
+  _PerspectiveProcessParams({
+    required this.sourcePath,
+    required this.tempPath,
+    required this.srcW, required this.srcH,
+    required this.rotation,
+    required this.grayscale,
+    required this.threshold,
+    required this.brightness,
+    required this.contrast,
+    required this.cropTL, required this.cropTR,
+    required this.cropBL, required this.cropBR,
+  });
+}
+
+/// Image editor with Rotate, B/W, Brightness/Contrast, and Perspective Crop tools.
 class ImageEditScreen extends StatefulWidget {
   final String imagePath;
   final ImageEditParams? initialParams;
@@ -63,10 +92,11 @@ class _ImageEditScreenState extends State<ImageEditScreen> {
   late double _brightness;
   late double _contrast;
 
-  late double _cropLeft;
-  late double _cropTop;
-  late double _cropRight;
-  late double _cropBottom;
+  // Perspective crop: 4 corners normalized 0..1
+  late Offset _cropTL;
+  late Offset _cropTR;
+  late Offset _cropBL;
+  late Offset _cropBR;
 
   _EditTool _activeTool = _EditTool.rotate;
   bool _isProcessing = false;
@@ -75,9 +105,9 @@ class _ImageEditScreenState extends State<ImageEditScreen> {
   ui.Image? _loadedImage;
   bool _imageLoading = true;
 
-  // Pre-rendered B/W image (software-rendered, no GPU precision issues)
+  // Pre-rendered B/W preview (software-rendered, no GPU precision issues)
   ui.Image? _bwPreviewImage;
-  bool _bwPreviewDirty = true; // Needs re-render when grayscale/threshold change
+  bool _bwPreviewDirty = true;
 
   @override
   void initState() {
@@ -88,10 +118,10 @@ class _ImageEditScreenState extends State<ImageEditScreen> {
     _threshold = p.threshold;
     _brightness = p.brightness;
     _contrast = p.contrast;
-    _cropLeft = p.cropLeft;
-    _cropTop = p.cropTop;
-    _cropRight = p.cropRight;
-    _cropBottom = p.cropBottom;
+    _cropTL = p.cropTL;
+    _cropTR = p.cropTR;
+    _cropBL = p.cropBL;
+    _cropBR = p.cropBR;
 
     _loadImage();
   }
@@ -103,10 +133,10 @@ class _ImageEditScreenState extends State<ImageEditScreen> {
       _threshold = 128.0;
       _brightness = 0.0;
       _contrast = 0.0;
-      _cropLeft = 0.0;
-      _cropTop = 0.0;
-      _cropRight = 1.0;
-      _cropBottom = 1.0;
+      _cropTL = const Offset(0, 0);
+      _cropTR = const Offset(1, 0);
+      _cropBL = const Offset(0, 1);
+      _cropBR = const Offset(1, 1);
       _bwPreviewDirty = true;
     });
     _rebuildBWPreviewIfNeeded();
@@ -132,25 +162,22 @@ class _ImageEditScreenState extends State<ImageEditScreen> {
         threshold: _threshold,
         brightness: _brightness,
         contrast: _contrast,
-        cropLeft: _cropLeft,
-        cropTop: _cropTop,
-        cropRight: _cropRight,
-        cropBottom: _cropBottom,
+        cropTL: _cropTL,
+        cropTR: _cropTR,
+        cropBL: _cropBL,
+        cropBR: _cropBR,
       );
 
   // --- B/W preview rendering (software path, avoids GPU fp16 precision issues) ---
 
-  /// Renders the B/W threshold effect via PictureRecorder.toImage().
-  /// This uses the same code path as the final render, which the user
-  /// confirmed produces correct/uniform results.
   Future<void> _rebuildBWPreviewIfNeeded() async {
     if (!_bwPreviewDirty || !_grayscale) return;
-    final img = _loadedImage;
-    if (img == null) return;
+    final srcImg = _loadedImage;
+    if (srcImg == null) return;
 
     _bwPreviewDirty = false;
 
-    // Build grayscale + threshold matrix
+    // Apply color matrix (grayscale + threshold) via software path
     List<double> bwMatrix = [
       1, 0, 0, 0, 0,
       0, 1, 0, 0, 0,
@@ -158,18 +185,16 @@ class _ImageEditScreenState extends State<ImageEditScreen> {
       0, 0, 0, 1, 0,
     ];
 
-    // Grayscale
-    const r = 0.2126;
-    const g = 0.7152;
-    const b = 0.0722;
+    const rx = 0.2126;
+    const gx = 0.7152;
+    const bx = 0.0722;
     bwMatrix = _multiplyMatrix(bwMatrix, [
-      r, g, b, 0, 0,
-      r, g, b, 0, 0,
-      r, g, b, 0, 0,
+      rx, gx, bx, 0, 0,
+      rx, gx, bx, 0, 0,
+      rx, gx, bx, 0, 0,
       0, 0, 0, 1, 0,
     ]);
 
-    // Threshold
     const thresholdScale = 50.0;
     final t = _threshold / 255.0;
     final offset = (-t * thresholdScale + 0.5) * 255.0;
@@ -180,114 +205,18 @@ class _ImageEditScreenState extends State<ImageEditScreen> {
       0, 0, 0, 1, 0,
     ]);
 
-    // Render via PictureRecorder (software path — produces correct results)
     final recorder = ui.PictureRecorder();
-    final w = img.width.toDouble();
-    final h = img.height.toDouble();
+    final w = srcImg.width.toDouble();
+    final h = srcImg.height.toDouble();
     final canvas = Canvas(recorder, Rect.fromLTWH(0, 0, w, h));
-
     final paint = Paint()..colorFilter = ColorFilter.matrix(bwMatrix);
-    canvas.drawImage(img, Offset.zero, paint);
-
+    canvas.drawImage(srcImg, Offset.zero, paint);
     final picture = recorder.endRecording();
-    final rendered = await picture.toImage(img.width, img.height);
+    final rendered = await picture.toImage(srcImg.width, srcImg.height);
 
     if (mounted) {
       setState(() => _bwPreviewImage = rendered);
     }
-  }
-
-  // --- Color matrix for brightness/contrast ONLY (small values, GPU-safe) ---
-
-  List<double> _buildLiveColorMatrix() {
-    List<double> matrix = [
-      1, 0, 0, 0, 0,
-      0, 1, 0, 0, 0,
-      0, 0, 1, 0, 0,
-      0, 0, 0, 1, 0,
-    ];
-
-    if (_brightness != 0) {
-      final b = _brightness * 2.55;
-      matrix = _multiplyMatrix(matrix, [
-        1, 0, 0, 0, b,
-        0, 1, 0, 0, b,
-        0, 0, 1, 0, b,
-        0, 0, 0, 1, 0,
-      ]);
-    }
-
-    if (_contrast != 0) {
-      final c = _contrast / 100.0;
-      final scale = 1.0 + c;
-      final translate = 128.0 * (1.0 - scale);
-      matrix = _multiplyMatrix(matrix, [
-        scale, 0, 0, 0, translate,
-        0, scale, 0, 0, translate,
-        0, 0, scale, 0, translate,
-        0, 0, 0, 1, 0,
-      ]);
-    }
-
-    // If NOT in B/W mode but grayscale is off, just return brightness/contrast
-    // If in B/W mode, the B/W is already baked into _bwPreviewImage
-    return matrix;
-  }
-
-  /// Full matrix for final rendering (used by _renderFinalImage only).
-  List<double> _buildFullColorMatrix() {
-    List<double> matrix = [
-      1, 0, 0, 0, 0,
-      0, 1, 0, 0, 0,
-      0, 0, 1, 0, 0,
-      0, 0, 0, 1, 0,
-    ];
-
-    if (_brightness != 0) {
-      final b = _brightness * 2.55;
-      matrix = _multiplyMatrix(matrix, [
-        1, 0, 0, 0, b,
-        0, 1, 0, 0, b,
-        0, 0, 1, 0, b,
-        0, 0, 0, 1, 0,
-      ]);
-    }
-
-    if (_contrast != 0) {
-      final c = _contrast / 100.0;
-      final scale = 1.0 + c;
-      final translate = 128.0 * (1.0 - scale);
-      matrix = _multiplyMatrix(matrix, [
-        scale, 0, 0, 0, translate,
-        0, scale, 0, 0, translate,
-        0, 0, scale, 0, translate,
-        0, 0, 0, 1, 0,
-      ]);
-    }
-
-    if (_grayscale) {
-      const r = 0.2126;
-      const g = 0.7152;
-      const b = 0.0722;
-      matrix = _multiplyMatrix(matrix, [
-        r, g, b, 0, 0,
-        r, g, b, 0, 0,
-        r, g, b, 0, 0,
-        0, 0, 0, 1, 0,
-      ]);
-
-      const thresholdScale = 50.0;
-      final t = _threshold / 255.0;
-      final offset = (-t * thresholdScale + 0.5) * 255.0;
-      matrix = _multiplyMatrix(matrix, [
-        thresholdScale, 0, 0, 0, offset,
-        0, thresholdScale, 0, 0, offset,
-        0, 0, thresholdScale, 0, offset,
-        0, 0, 0, 1, 0,
-      ]);
-    }
-
-    return matrix;
   }
 
   static List<double> _multiplyMatrix(List<double> a, List<double> b) {
@@ -305,37 +234,75 @@ class _ImageEditScreenState extends State<ImageEditScreen> {
     return result;
   }
 
-  // --- Confirm ---
+  // --- Process and Confirm ---
 
   Future<void> _confirmEdit() async {
-    final img = _loadedImage;
-    if (img == null) return;
+    final uiImg = _loadedImage;
+    if (uiImg == null) return;
 
     setState(() => _isProcessing = true);
 
     try {
-      final editedPath = await _renderFinalImage(img);
+      final editedPath = await _renderFinalImage(uiImg);
       if (mounted) {
         Navigator.of(context).pop(ImageEditResult(editedPath, _currentParams));
       }
-    } catch (e) {
+    } catch (e, stack) {
+      debugPrint('Error procesando imagen: $e\n$stack');
       if (mounted) {
         setState(() => _isProcessing = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error procesando imagen: $e'), backgroundColor: Colors.red),
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
         );
       }
     }
   }
 
-  Future<String> _renderFinalImage(ui.Image sourceImg) async {
-    final int srcW = sourceImg.width;
-    final int srcH = sourceImg.height;
+  bool get _isRectCrop =>
+      _cropTL.dx == _cropBL.dx && _cropTR.dx == _cropBR.dx &&
+      _cropTL.dy == _cropTR.dy && _cropBL.dy == _cropBR.dy;
 
-    final cropL = (_cropLeft * srcW).round();
-    final cropT = (_cropTop * srcH).round();
-    final cropR = (_cropRight * srcW).round();
-    final cropB = (_cropBottom * srcH).round();
+  bool get _isFullCrop =>
+      _cropTL == const Offset(0, 0) && _cropTR == const Offset(1, 0) &&
+      _cropBL == const Offset(0, 1) && _cropBR == const Offset(1, 1);
+
+  Future<String> _renderFinalImage(ui.Image sourceImg) async {
+    final bool needsPerspective = !_isRectCrop && !_isFullCrop;
+
+    if (needsPerspective) {
+      // Background isolate processing (avoids UI freeze/crashes on large images)
+      final tempDir = Directory.systemTemp;
+      final tempPath = '${tempDir.path}/atril_edit_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      
+      final params = _PerspectiveProcessParams(
+        sourcePath: widget.imagePath,
+        tempPath: tempPath,
+        srcW: sourceImg.width,
+        srcH: sourceImg.height,
+        rotation: _rotation,
+        grayscale: _grayscale,
+        threshold: _threshold,
+        brightness: _brightness,
+        contrast: _contrast,
+        cropTL: _cropTL, cropTR: _cropTR,
+        cropBL: _cropBL, cropBR: _cropBR,
+      );
+
+      return await compute(_processPerspectiveIsolate, params);
+    } else {
+      // Fast Rect Crop path (dart:ui)
+      return _renderRectCrop(sourceImg);
+    }
+  }
+
+  /// Fast path for simple rectangular crops using dart:ui (native/GPU).
+  Future<String> _renderRectCrop(ui.Image sourceImg) async {
+    final srcW = sourceImg.width;
+    final srcH = sourceImg.height;
+    final cropL = (_cropTL.dx * srcW).round();
+    final cropT = (_cropTL.dy * srcH).round();
+    final cropR = (_cropBR.dx * srcW).round();
+    final cropB = (_cropBR.dy * srcH).round();
     final cropW = cropR - cropL;
     final cropH = cropB - cropT;
 
@@ -347,15 +314,30 @@ class _ImageEditScreenState extends State<ImageEditScreen> {
 
     final recorder = ui.PictureRecorder();
     final canvas = Canvas(recorder, Rect.fromLTWH(0, 0, outW.toDouble(), outH.toDouble()));
-
     canvas.translate(outW / 2.0, outH / 2.0);
     canvas.rotate(_rotation * math.pi / 2.0);
     canvas.translate(-cropW / 2.0, -cropH / 2.0);
 
-    // Use full matrix for final render (PictureRecorder uses software path)
-    final matrix = _buildFullColorMatrix();
-    final paint = Paint()..colorFilter = ColorFilter.matrix(matrix);
+    // Color Matrix
+    List<double> matrix = [1,0,0,0,0, 0,1,0,0,0, 0,0,1,0,0, 0,0,0,1,0];
+    if (_brightness != 0) {
+      final b = _brightness * 2.55;
+      matrix = _multiplyMatrix(matrix, [1,0,0,0,b, 0,1,0,0,b, 0,0,1,0,b, 0,0,0,1,0]);
+    }
+    if (_contrast != 0) {
+      final c = _contrast / 100.0 + 1.0;
+      final t = 128.0 * (1.0 - c);
+      matrix = _multiplyMatrix(matrix, [c,0,0,0,t, 0,c,0,0,t, 0,0,c,0,t, 0,0,0,1,0]);
+    }
+    if (_grayscale) {
+      const rx = 0.2126; const gx = 0.7152; const bx = 0.0722;
+      matrix = _multiplyMatrix(matrix, [rx,gx,bx,0,0, rx,gx,bx,0,0, rx,gx,bx,0,0, 0,0,0,1,0]);
+      const ts = 50.0;
+      final offset = (- (_threshold / 255.0) * ts + 0.5) * 255.0;
+      matrix = _multiplyMatrix(matrix, [ts,0,0,0,offset, 0,ts,0,0,offset, 0,0,ts,0,offset, 0,0,0,1,0]);
+    }
 
+    final paint = Paint()..colorFilter = ColorFilter.matrix(matrix);
     canvas.drawImageRect(
       sourceImg,
       Rect.fromLTRB(cropL.toDouble(), cropT.toDouble(), cropR.toDouble(), cropB.toDouble()),
@@ -366,17 +348,15 @@ class _ImageEditScreenState extends State<ImageEditScreen> {
     final picture = recorder.endRecording();
     final renderedImage = await picture.toImage(outW, outH);
     final byteData = await renderedImage.toByteData(format: ui.ImageByteFormat.png);
-
-    if (byteData == null) throw Exception('No se pudo renderizar');
+    if (byteData == null) throw Exception('Null byteData');
 
     final tempDir = Directory.systemTemp;
     final tempFile = File('${tempDir.path}/atril_edit_${DateTime.now().millisecondsSinceEpoch}.png');
     await tempFile.writeAsBytes(byteData.buffer.asUint8List(), flush: true);
-
     return tempFile.path;
   }
 
-  // --- BUILD ---
+  // --- UI Build ---
 
   @override
   Widget build(BuildContext context) {
@@ -387,18 +367,18 @@ class _ImageEditScreenState extends State<ImageEditScreen> {
         foregroundColor: Colors.white,
         title: const Text('Editar Imagen'),
         actions: [
-          if (!_isProcessing)
+          if (!_isProcessing) ...[
             IconButton(
               onPressed: _resetAll,
               icon: const Icon(Icons.refresh, color: Colors.white54),
               tooltip: 'Resetear todo',
             ),
-          if (!_isProcessing)
             TextButton.icon(
               onPressed: _confirmEdit,
               icon: const Icon(Icons.check, color: Colors.greenAccent),
               label: const Text('Confirmar', style: TextStyle(color: Colors.greenAccent)),
             ),
+          ]
         ],
       ),
       body: _imageLoading || _isProcessing
@@ -409,7 +389,7 @@ class _ImageEditScreenState extends State<ImageEditScreen> {
                   const CircularProgressIndicator(color: Colors.white),
                   const SizedBox(height: 16),
                   Text(
-                    _isProcessing ? 'Procesando...' : 'Cargando...',
+                    _isProcessing ? 'Procesando perspectiva...' : 'Cargando...',
                     style: const TextStyle(color: Colors.white70),
                   ),
                 ],
@@ -425,23 +405,25 @@ class _ImageEditScreenState extends State<ImageEditScreen> {
     );
   }
 
-  /// Gets the image to display: B/W pre-rendered or original.
-  ui.Image? get _previewImage =>
-      (_grayscale && _bwPreviewImage != null) ? _bwPreviewImage : _loadedImage;
-
   Widget _buildPreview() {
-    final img = _previewImage;
-    if (img == null) return const SizedBox.shrink();
+    final previewImg = (_grayscale && _bwPreviewImage != null) ? _bwPreviewImage! : _loadedImage;
+    if (previewImg == null) return const SizedBox.shrink();
 
-    // Live color filter: only brightness/contrast (small GPU-safe values)
-    final liveMatrix = _buildLiveColorMatrix();
-    final colorFilter = ColorFilter.matrix(liveMatrix);
+    // Live matrix for brightness/contrast
+    List<double> matrix = [1,0,0,0,0, 0,1,0,0,0, 0,0,1,0,0, 0,0,0,1,0];
+    if (_brightness != 0) {
+      final b = _brightness * 2.55;
+      matrix = _multiplyMatrix(matrix, [1,0,0,0,b, 0,1,0,0,b, 0,0,1,0,b, 0,0,0,1,0]);
+    }
+    if (_contrast != 0) {
+      final c = _contrast / 100.0 + 1.0;
+      final t = 128.0 * (1.0 - c);
+      matrix = _multiplyMatrix(matrix, [c,0,0,0,t, 0,c,0,0,t, 0,0,c,0,t, 0,0,0,1,0]);
+    }
+    final colorFilter = ColorFilter.matrix(matrix);
 
     if (_activeTool == _EditTool.crop) {
-      // Use the original image for crop (coordinates are relative to original)
-      return Center(
-        child: _buildCropPreview(_loadedImage!, colorFilter),
-      );
+      return Center(child: _buildCropPreview(_loadedImage!, colorFilter));
     }
 
     return Center(
@@ -449,12 +431,10 @@ class _ImageEditScreenState extends State<ImageEditScreen> {
         quarterTurns: _rotation,
         child: LayoutBuilder(
           builder: (context, constraints) {
+            final size = _fitSize(previewImg.width.toDouble(), previewImg.height.toDouble(), constraints.maxWidth, constraints.maxHeight);
             return CustomPaint(
-              painter: _ImagePreviewPainter(image: img, colorFilter: colorFilter),
-              size: _fitSize(
-                img.width.toDouble(), img.height.toDouble(),
-                constraints.maxWidth, constraints.maxHeight,
-              ),
+              painter: _ImagePreviewPainter(image: previewImg, colorFilter: colorFilter),
+              size: size,
             );
           },
         ),
@@ -464,43 +444,24 @@ class _ImageEditScreenState extends State<ImageEditScreen> {
 
   Size _fitSize(double imgW, double imgH, double maxW, double maxH) {
     final imgAspect = imgW / imgH;
-    if (imgAspect > maxW / maxH) {
-      return Size(maxW, maxW / imgAspect);
-    } else {
-      return Size(maxH * imgAspect, maxH);
-    }
+    return (imgAspect > maxW / maxH) ? Size(maxW, maxW / imgAspect) : Size(maxH * imgAspect, maxH);
   }
 
-  Widget _buildCropPreview(ui.Image img, ColorFilter colorFilter) {
+  Widget _buildCropPreview(ui.Image uiImg, ColorFilter colorFilter) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final displaySize = _fitSize(
-          img.width.toDouble(), img.height.toDouble(),
-          constraints.maxWidth, constraints.maxHeight,
-        );
-
+        final displaySize = _fitSize(uiImg.width.toDouble(), uiImg.height.toDouble(), constraints.maxWidth, constraints.maxHeight);
         return SizedBox(
           width: displaySize.width,
           height: displaySize.height,
           child: Stack(
             children: [
-              Positioned.fill(
-                child: CustomPaint(
-                  painter: _ImagePreviewPainter(image: img, colorFilter: colorFilter),
-                ),
-              ),
-              Positioned.fill(
-                child: CustomPaint(
-                  painter: _CropOverlayPainter(
-                    cropLeft: _cropLeft, cropTop: _cropTop,
-                    cropRight: _cropRight, cropBottom: _cropBottom,
-                  ),
-                ),
-              ),
-              _buildHandle(displaySize.width, displaySize.height, _Corner.topLeft),
-              _buildHandle(displaySize.width, displaySize.height, _Corner.topRight),
-              _buildHandle(displaySize.width, displaySize.height, _Corner.bottomLeft),
-              _buildHandle(displaySize.width, displaySize.height, _Corner.bottomRight),
+              Positioned.fill(child: CustomPaint(painter: _ImagePreviewPainter(image: uiImg, colorFilter: colorFilter))),
+              Positioned.fill(child: CustomPaint(painter: _PerspectiveCropOverlayPainter(cropTL:_cropTL, cropTR:_cropTR, cropBL:_cropBL, cropBR:_cropBR))),
+              _buildCornerHandle(displaySize, _Corner.topLeft, _cropTL),
+              _buildCornerHandle(displaySize, _Corner.topRight, _cropTR),
+              _buildCornerHandle(displaySize, _Corner.bottomLeft, _cropBL),
+              _buildCornerHandle(displaySize, _Corner.bottomRight, _cropBR),
             ],
           ),
         );
@@ -508,64 +469,31 @@ class _ImageEditScreenState extends State<ImageEditScreen> {
     );
   }
 
-  Widget _buildHandle(double displayW, double displayH, _Corner corner) {
-    double left, top;
-
-    switch (corner) {
-      case _Corner.topLeft:
-        left = _cropLeft * displayW; top = _cropTop * displayH; break;
-      case _Corner.topRight:
-        left = _cropRight * displayW; top = _cropTop * displayH; break;
-      case _Corner.bottomLeft:
-        left = _cropLeft * displayW; top = _cropBottom * displayH; break;
-      case _Corner.bottomRight:
-        left = _cropRight * displayW; top = _cropBottom * displayH; break;
-    }
-
-    const handleSize = 32.0;
-
+  Widget _buildCornerHandle(Size displaySize, _Corner corner, Offset pos) {
+    const handleSize = 40.0;
     return Positioned(
-      left: left - handleSize / 2,
-      top: top - handleSize / 2,
+      left: pos.dx * displaySize.width - handleSize / 2,
+      top: pos.dy * displaySize.height - handleSize / 2,
       child: GestureDetector(
         onPanUpdate: (details) {
           setState(() {
-            final dx = details.delta.dx / displayW;
-            final dy = details.delta.dy / displayH;
+            final dx = details.delta.dx / displaySize.width;
+            final dy = details.delta.dy / displaySize.height;
             switch (corner) {
-              case _Corner.topLeft:
-                _cropLeft = (_cropLeft + dx).clamp(0.0, _cropRight - 0.05);
-                _cropTop = (_cropTop + dy).clamp(0.0, _cropBottom - 0.05);
-                break;
-              case _Corner.topRight:
-                _cropRight = (_cropRight + dx).clamp(_cropLeft + 0.05, 1.0);
-                _cropTop = (_cropTop + dy).clamp(0.0, _cropBottom - 0.05);
-                break;
-              case _Corner.bottomLeft:
-                _cropLeft = (_cropLeft + dx).clamp(0.0, _cropRight - 0.05);
-                _cropBottom = (_cropBottom + dy).clamp(_cropTop + 0.05, 1.0);
-                break;
-              case _Corner.bottomRight:
-                _cropRight = (_cropRight + dx).clamp(_cropLeft + 0.05, 1.0);
-                _cropBottom = (_cropBottom + dy).clamp(_cropTop + 0.05, 1.0);
-                break;
+              case _Corner.topLeft: _cropTL = Offset((_cropTL.dx+dx).clamp(0,1), (_cropTL.dy+dy).clamp(0,1)); break;
+              case _Corner.topRight: _cropTR = Offset((_cropTR.dx+dx).clamp(0,1), (_cropTR.dy+dy).clamp(0,1)); break;
+              case _Corner.bottomLeft: _cropBL = Offset((_cropBL.dx+dx).clamp(0,1), (_cropBL.dy+dy).clamp(0,1)); break;
+              case _Corner.bottomRight: _cropBR = Offset((_cropBR.dx+dx).clamp(0,1), (_cropBR.dy+dy).clamp(0,1)); break;
             }
           });
         },
         child: Container(
           width: handleSize, height: handleSize,
-          decoration: BoxDecoration(
-            color: Colors.white,
-            shape: BoxShape.circle,
-            border: Border.all(color: Colors.cyanAccent, width: 2),
-            boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 4)],
-          ),
+          decoration: BoxDecoration(color: Colors.white, shape: BoxShape.circle, border: Border.all(color: Colors.cyanAccent, width: 2), boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 4)]),
         ),
       ),
     );
   }
-
-  // --- Tool controls ---
 
   Widget _buildToolControls() {
     return Container(
@@ -581,239 +509,270 @@ class _ImageEditScreenState extends State<ImageEditScreen> {
   }
 
   Widget _buildRotateControls() {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        IconButton(
-          onPressed: () => setState(() => _rotation = (_rotation - 1) % 4),
-          icon: const Icon(Icons.rotate_left, color: Colors.white, size: 32),
-          tooltip: 'Rotar izquierda',
-        ),
-        const SizedBox(width: 32),
-        Text('${_rotation * 90}°', style: const TextStyle(color: Colors.white70, fontSize: 18)),
-        const SizedBox(width: 32),
-        IconButton(
-          onPressed: () => setState(() => _rotation = (_rotation + 1) % 4),
-          icon: const Icon(Icons.rotate_right, color: Colors.white, size: 32),
-          tooltip: 'Rotar derecha',
-        ),
-      ],
-    );
+    return Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+      IconButton(onPressed: () => setState(() => _rotation = (_rotation - 1) % 4), icon: const Icon(Icons.rotate_left, color: Colors.white, size: 32)),
+      const SizedBox(width: 32),
+      Text('${_rotation * 90}°', style: const TextStyle(color: Colors.white70, fontSize: 18)),
+      const SizedBox(width: 32),
+      IconButton(onPressed: () => setState(() => _rotation = (_rotation + 1) % 4), icon: const Icon(Icons.rotate_right, color: Colors.white, size: 32)),
+    ]);
   }
 
   Widget _buildBWControls() {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Row(
-          children: [
-            const Icon(Icons.monochrome_photos, color: Colors.white54),
-            const SizedBox(width: 12),
-            const Text('Blanco y Negro', style: TextStyle(color: Colors.white)),
-            const Spacer(),
-            Switch(
-              value: _grayscale,
-              activeTrackColor: Colors.cyanAccent,
-              onChanged: (v) {
-                setState(() {
-                  _grayscale = v;
-                  _bwPreviewDirty = true;
-                });
-                _rebuildBWPreviewIfNeeded();
-              },
-            ),
-          ],
-        ),
-        if (_grayscale) ...[
-          const SizedBox(height: 4),
-          Row(
-            children: [
-              const Text('Umbral', style: TextStyle(color: Colors.white54, fontSize: 13)),
-              Expanded(
-                child: Slider(
-                  value: _threshold,
-                  min: 50, max: 220,
-                  activeColor: Colors.cyanAccent,
-                  inactiveColor: Colors.white24,
-                  onChanged: (v) {
-                    setState(() {
-                      _threshold = v;
-                      _bwPreviewDirty = true;
-                    });
-                  },
-                  onChangeEnd: (_) => _rebuildBWPreviewIfNeeded(),
-                ),
-              ),
-              SizedBox(
-                width: 36,
-                child: Text('${_threshold.round()}',
-                  style: const TextStyle(color: Colors.white54, fontSize: 13),
-                  textAlign: TextAlign.right,
-                ),
-              ),
-            ],
-          ),
-        ],
+    return Column(mainAxisSize: MainAxisSize.min, children: [
+      Row(children: [
+        const Icon(Icons.monochrome_photos, color: Colors.white54),
+        const SizedBox(width: 12),
+        const Text('Blanco y Negro', style: TextStyle(color: Colors.white)),
+        const Spacer(),
+        Switch(value: _grayscale, activeTrackColor: Colors.cyanAccent, onChanged: (v) {
+          setState(() { _grayscale = v; _bwPreviewDirty = true; });
+          _rebuildBWPreviewIfNeeded();
+        }),
+      ]),
+      if (_grayscale) ...[
+        const SizedBox(height: 4),
+        Row(children: [
+          const Text('Umbral', style: TextStyle(color: Colors.white54, fontSize: 13)),
+          Expanded(child: Slider(value: _threshold, min: 50, max: 220, activeColor: Colors.cyanAccent, inactiveColor: Colors.white24, onChanged: (v) {
+            setState(() { _threshold = v; _bwPreviewDirty = true; });
+          }, onChangeEnd: (_) => _rebuildBWPreviewIfNeeded())),
+          SizedBox(width: 36, child: Text('${_threshold.round()}', style: const TextStyle(color: Colors.white54, fontSize: 13), textAlign: TextAlign.right)),
+        ]),
       ],
-    );
+    ]);
   }
 
   Widget _buildBrightnessControls() {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        _buildSliderRow('Brillo', _brightness, -100, 100, (v) => setState(() => _brightness = v)),
-        const SizedBox(height: 8),
-        _buildSliderRow('Contraste', _contrast, -100, 100, (v) => setState(() => _contrast = v)),
-      ],
-    );
+    return Column(mainAxisSize: MainAxisSize.min, children: [
+      _buildSliderRow('Brillo', _brightness, -100, 100, (v) => setState(() => _brightness = v)),
+      const SizedBox(height: 8),
+      _buildSliderRow('Contraste', _contrast, -100, 100, (v) => setState(() => _contrast = v)),
+    ]);
   }
 
   Widget _buildSliderRow(String label, double value, double min, double max, ValueChanged<double> onChanged) {
-    return Row(
-      children: [
-        SizedBox(width: 70, child: Text(label, style: const TextStyle(color: Colors.white54, fontSize: 13))),
-        Expanded(
-          child: Slider(
-            value: value, min: min, max: max,
-            activeColor: Colors.cyanAccent,
-            inactiveColor: Colors.white24,
-            onChanged: onChanged,
-          ),
-        ),
-        SizedBox(
-          width: 36,
-          child: Text('${value.round()}',
-            style: const TextStyle(color: Colors.white54, fontSize: 13),
-            textAlign: TextAlign.right,
-          ),
-        ),
-      ],
-    );
+    return Row(children: [
+      SizedBox(width: 70, child: Text(label, style: const TextStyle(color: Colors.white54, fontSize: 13))),
+      Expanded(child: Slider(value: value, min: min, max: max, activeColor: Colors.cyanAccent, inactiveColor: Colors.white24, onChanged: onChanged)),
+      SizedBox(width: 36, child: Text('${value.round()}', style: const TextStyle(color: Colors.white54, fontSize: 13), textAlign: TextAlign.right)),
+    ]);
   }
 
   Widget _buildCropControls() {
-    final hasCustomCrop = _cropLeft > 0.01 || _cropTop > 0.01 || _cropRight < 0.99 || _cropBottom < 0.99;
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        const Icon(Icons.crop, color: Colors.white54),
-        const SizedBox(width: 12),
-        const Text('Arrastrá las esquinas', style: TextStyle(color: Colors.white70, fontSize: 14)),
-        if (hasCustomCrop) ...[
-          const SizedBox(width: 16),
-          TextButton(
-            onPressed: () => setState(() {
-              _cropLeft = 0; _cropTop = 0; _cropRight = 1; _cropBottom = 1;
-            }),
-            child: const Text('Resetear', style: TextStyle(color: Colors.cyanAccent)),
-          ),
-        ],
+    return Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+      const Icon(Icons.crop, color: Colors.white54),
+      const SizedBox(width: 12),
+      const Text('Arrastrá las esquinas', style: TextStyle(color: Colors.white70, fontSize: 14)),
+      if (!_isFullCrop) ...[
+        const SizedBox(width: 16),
+        TextButton(onPressed: () => setState(() {
+          _cropTL = const Offset(0,0); _cropTR = const Offset(1,0); _cropBL = const Offset(0,1); _cropBR = const Offset(1,1);
+        }), child: const Text('Resetear', style: TextStyle(color: Colors.cyanAccent))),
       ],
-    );
+    ]);
   }
 
   Widget _buildToolBar() {
-    return Container(
-      color: Colors.black,
-      child: SafeArea(
-        top: false,
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-          children: [
-            _toolBarItem(_EditTool.rotate, Icons.rotate_right, 'Rotar'),
-            _toolBarItem(_EditTool.bw, Icons.monochrome_photos, 'B/N'),
-            _toolBarItem(_EditTool.brightness, Icons.brightness_6, 'Brillo'),
-            _toolBarItem(_EditTool.crop, Icons.crop, 'Recortar'),
-          ],
-        ),
-      ),
-    );
+    return Container(color: Colors.black, child: SafeArea(top: false, child: Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
+      _toolBarItem(_EditTool.rotate, Icons.rotate_right, 'Rotar'),
+      _toolBarItem(_EditTool.bw, Icons.monochrome_photos, 'B/N'),
+      _toolBarItem(_EditTool.brightness, Icons.brightness_6, 'Brillo'),
+      _toolBarItem(_EditTool.crop, Icons.crop, 'Recortar'),
+    ])));
   }
 
   Widget _toolBarItem(_EditTool tool, IconData icon, String label) {
     final selected = _activeTool == tool;
-    return InkWell(
-      onTap: () => setState(() => _activeTool = tool),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, color: selected ? Colors.cyanAccent : Colors.white54, size: 24),
-            const SizedBox(height: 4),
-            Text(label, style: TextStyle(
-              color: selected ? Colors.cyanAccent : Colors.white54,
-              fontSize: 11,
-              fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
-            )),
-          ],
-        ),
-      ),
-    );
+    return InkWell(onTap: () => setState(() => _activeTool = tool), child: Padding(padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 16), child: Column(mainAxisSize: MainAxisSize.min, children: [
+      Icon(icon, color: selected ? Colors.cyanAccent : Colors.white54, size: 24),
+      const SizedBox(height: 4),
+      Text(label, style: TextStyle(color: selected ? Colors.cyanAccent : Colors.white54, fontSize: 11, fontWeight: selected ? FontWeight.w600 : FontWeight.normal)),
+    ])));
   }
 }
 
-// --- Custom painter ---
-class _ImagePreviewPainter extends CustomPainter {
-  final ui.Image image;
-  final ColorFilter colorFilter;
+// --- Top-level Isolate Processing ---
 
-  _ImagePreviewPainter({required this.image, required this.colorFilter});
+Future<String> _processPerspectiveIsolate(_PerspectiveProcessParams p) async {
+  final file = File(p.sourcePath);
+  final bytes = file.readAsBytesSync();
+  var source = img.decodeImage(bytes);
+  if (source == null) throw Exception('No se pudo decodificar la imagen');
 
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()..colorFilter = colorFilter;
-    final srcRect = Rect.fromLTWH(0, 0, image.width.toDouble(), image.height.toDouble());
-    final dstRect = Rect.fromLTWH(0, 0, size.width, size.height);
-    canvas.drawImageRect(image, srcRect, dstRect, paint);
+  // CRITICAL: Ensure orientation matches Flutter UI view
+  source = img.bakeOrientation(source);
+  final int realW = source.width;
+  final int realH = source.height;
+
+  // Warp Quad points back to real pixel coordinates
+  final tl = math.Point<double>(p.cropTL.dx * realW, p.cropTL.dy * realH);
+  final tr = math.Point<double>(p.cropTR.dx * realW, p.cropTR.dy * realH);
+  final bl = math.Point<double>(p.cropBL.dx * realW, p.cropBL.dy * realH);
+  final br = math.Point<double>(p.cropBR.dx * realW, p.cropBR.dy * realH);
+
+  // Output: A4 (1240 x 1754 @ 150dpi)
+  const int outW = 1240;
+  const int outH = 1754;
+
+  // 1. Calculate Homography Matrix H (3x3)
+  // Maps target (u,v) in A4 to source (x,y) in photo
+  final h = _calculateHomography(
+    const math.Point(0.0, 0.0), const math.Point(1240.0, 0.0),
+    const math.Point(1240.0, 1754.0), const math.Point(0.0, 1754.0),
+    tl, tr, br, bl,
+  );
+
+  // 2. Perform Perspective Warp (Manual loop for true homography)
+  final result = img.Image(width: outW, height: outH);
+  for (int v = 0; v < outH; v++) {
+    for (int u = 0; u < outW; u++) {
+      // Apply homography transformation u,v -> x,y
+      final double denominator = h[6] * u + h[7] * v + 1.0;
+      final double x = (h[0] * u + h[1] * v + h[2]) / denominator;
+      final double y = (h[3] * u + h[4] * v + h[5]) / denominator;
+
+      // Bilinear sampling from source
+      if (x >= 0 && x < realW - 1 && y >= 0 && y < realH - 1) {
+        final pixel = source.getPixelInterpolate(x, y, interpolation: img.Interpolation.linear);
+        result.setPixel(u, v, pixel);
+      }
+    }
   }
 
-  @override
-  bool shouldRepaint(_ImagePreviewPainter old) =>
-      old.image != image || old.colorFilter != colorFilter;
+  // 3. Apply Filters (Optimized package:image versions)
+  if (p.brightness != 0 || p.contrast != 0) {
+    img.adjustColor(
+      result,
+      brightness: 1.0 + (p.brightness / 100.0),
+      contrast: 1.0 + (p.contrast / 100.0),
+    );
+  }
+
+  if (p.grayscale) {
+    img.grayscale(result);
+    img.luminanceThreshold(result, threshold: p.threshold / 255.0);
+  }
+
+  // Rotation (if needed)
+  var finalResult = result;
+  if (p.rotation != 0) {
+    finalResult = img.copyRotate(result, angle: (p.rotation % 4) * 90);
+  }
+
+  // Save as JPG (FASTER than PNG for large photos)
+  final outBytes = img.encodeJpg(finalResult, quality: 90);
+  final outFile = File(p.tempPath);
+  outFile.writeAsBytesSync(outBytes);
+
+  return p.tempPath;
+}
+
+/// Solves for the 8 coefficients of the 3x3 homography matrix (h22 = 1).
+/// Maps (u,v) in target square to (x,y) in source quadrilateral.
+List<double> _calculateHomography(
+    math.Point<double> t0, math.Point<double> t1, math.Point<double> t2, math.Point<double> t3,
+    math.Point<double> s0, math.Point<double> s1, math.Point<double> s2, math.Point<double> s3) {
+  
+  // Matrix A (8x8) and vector B (8x1) for the linear system A * h = B
+  final List<List<double>> a = List.generate(8, (_) => List.filled(8, 0.0));
+  final List<double> b = List.filled(8, 0.0);
+
+  final targets = [t0, t1, t2, t3];
+  final sources = [s0, s1, s2, s3];
+
+  for (int i = 0; i < 4; i++) {
+    final ui = targets[i].x;
+    final vi = targets[i].y;
+    final xi = sources[i].x;
+    final yi = sources[i].y;
+
+    // Equation for X: h00*u + h01*v + h02 - h20*u*x - h21*v*x = x
+    a[i * 2][0] = ui; a[i * 2][1] = vi; a[i * 2][2] = 1.0;
+    a[i * 2][6] = -ui * xi; a[i * 2][7] = -vi * xi;
+    b[i * 2] = xi;
+
+    // Equation for Y: h10*u + h11*v + h12 - h20*u*y - h21*v*y = y
+    a[i * 2 + 1][3] = ui; a[i * 2 + 1][4] = vi; a[i * 2 + 1][5] = 1.0;
+    a[i * 2 + 1][6] = -ui * yi; a[i * 2 + 1][7] = -vi * yi;
+    b[i * 2 + 1] = yi;
+  }
+
+  // Solve using Gaussian elimination
+  return _solveLinearSystem(a, b);
+}
+
+/// Simple 8x8 Gaussian elimination solver with pivoting.
+List<double> _solveLinearSystem(List<List<double>> a, List<double> b) {
+  final int n = b.length;
+  for (int i = 0; i < n; i++) {
+    // Pivot selection
+    int max = i;
+    for (int k = i + 1; k < n; k++) {
+      if (a[k][i].abs() > a[max][i].abs()) max = k;
+    }
+    // Swap rows
+    final tempA = a[i]; a[i] = a[max]; a[max] = tempA;
+    final tempB = b[i]; b[i] = b[max]; b[max] = tempB;
+
+    // Pivot
+    for (int k = i + 1; k < n; k++) {
+      final double factor = a[k][i] / a[i][i];
+      b[k] -= factor * b[i];
+      for (int j = i; j < n; j++) {
+        a[k][j] -= factor * a[i][j];
+      }
+    }
+  }
+
+  // Back substitution
+  final List<double> x = List.filled(n, 0.0);
+  for (int i = n - 1; i >= 0; i--) {
+    double sum = 0.0;
+    for (int j = i + 1; j < n; j++) {
+      sum += a[i][j] * x[j];
+    }
+    x[i] = (b[i] - sum) / a[i][i];
+  }
+  return x;
+}
+
+// --- Painters ---
+
+class _ImagePreviewPainter extends CustomPainter {
+  final ui.Image image; final ColorFilter colorFilter;
+  _ImagePreviewPainter({required this.image, required this.colorFilter});
+  @override void paint(Canvas canvas, Size size) {
+    final paint = Paint()..colorFilter = colorFilter;
+    canvas.drawImageRect(image, Rect.fromLTWH(0, 0, image.width.toDouble(), image.height.toDouble()), Rect.fromLTWH(0, 0, size.width, size.height), paint);
+  }
+  @override bool shouldRepaint(_ImagePreviewPainter old) => old.image != image || old.colorFilter != colorFilter;
 }
 
 enum _Corner { topLeft, topRight, bottomLeft, bottomRight }
 
-class _CropOverlayPainter extends CustomPainter {
-  final double cropLeft, cropTop, cropRight, cropBottom;
+class _PerspectiveCropOverlayPainter extends CustomPainter {
+  final Offset cropTL, cropTR, cropBL, cropBR;
+  _PerspectiveCropOverlayPainter({required this.cropTL, required this.cropTR, required this.cropBL, required this.cropBR});
 
-  _CropOverlayPainter({
-    required this.cropLeft, required this.cropTop,
-    required this.cropRight, required this.cropBottom,
-  });
+  @override void paint(Canvas canvas, Size size) {
+    final tl = Offset(cropTL.dx*size.width, cropTL.dy*size.height);
+    final tr = Offset(cropTR.dx*size.width, cropTR.dy*size.height);
+    final bl = Offset(cropBL.dx*size.width, cropBL.dy*size.height);
+    final br = Offset(cropBR.dx*size.width, cropBR.dy*size.height);
 
-  @override
-  void paint(Canvas canvas, Size size) {
-    final left = cropLeft * size.width;
-    final top = cropTop * size.height;
-    final right = cropRight * size.width;
-    final bottom = cropBottom * size.height;
+    final quadPath = Path()..moveTo(tl.dx,tl.dy)..lineTo(tr.dx,tr.dy)..lineTo(br.dx,br.dy)..lineTo(bl.dx,bl.dy)..close();
+    final fullPath = Path()..addRect(Rect.fromLTWH(0,0,size.width,size.height));
+    final dimPath = Path.combine(PathOperation.difference, fullPath, quadPath);
+    canvas.drawPath(dimPath, Paint()..color = Colors.black.withValues(alpha: 0.5));
+    canvas.drawPath(quadPath, Paint()..color = Colors.cyanAccent..style = PaintingStyle.stroke..strokeWidth = 2.0);
 
-    final dimPaint = Paint()..color = Colors.black.withValues(alpha: 0.5);
-    canvas.drawRect(Rect.fromLTRB(0, 0, size.width, top), dimPaint);
-    canvas.drawRect(Rect.fromLTRB(0, bottom, size.width, size.height), dimPaint);
-    canvas.drawRect(Rect.fromLTRB(0, top, left, bottom), dimPaint);
-    canvas.drawRect(Rect.fromLTRB(right, top, size.width, bottom), dimPaint);
-
-    final borderPaint = Paint()
-      ..color = Colors.cyanAccent ..style = PaintingStyle.stroke ..strokeWidth = 1.5;
-    canvas.drawRect(Rect.fromLTRB(left, top, right, bottom), borderPaint);
-
-    final thirdPaint = Paint()
-      ..color = Colors.white.withValues(alpha: 0.2)
-      ..style = PaintingStyle.stroke ..strokeWidth = 0.5;
-    final w = right - left;
-    final h = bottom - top;
-    canvas.drawLine(Offset(left + w / 3, top), Offset(left + w / 3, bottom), thirdPaint);
-    canvas.drawLine(Offset(left + 2 * w / 3, top), Offset(left + 2 * w / 3, bottom), thirdPaint);
-    canvas.drawLine(Offset(left, top + h / 3), Offset(right, top + h / 3), thirdPaint);
-    canvas.drawLine(Offset(left, top + 2 * h / 3), Offset(right, top + 2 * h / 3), thirdPaint);
+    final guidePaint = Paint()..color = Colors.white.withValues(alpha: 0.25)..style = PaintingStyle.stroke..strokeWidth = 0.5;
+    for (int i=1; i<=2; i++) {
+       final t = i/3.0;
+       canvas.drawLine(Offset.lerp(tl, bl, t)!, Offset.lerp(tr, br, t)!, guidePaint);
+       canvas.drawLine(Offset.lerp(tl, tr, t)!, Offset.lerp(bl, br, t)!, guidePaint);
+    }
   }
-
-  @override
-  bool shouldRepaint(_CropOverlayPainter old) =>
-      old.cropLeft != cropLeft || old.cropTop != cropTop ||
-      old.cropRight != cropRight || old.cropBottom != cropBottom;
+  @override bool shouldRepaint(_PerspectiveCropOverlayPainter old) => old.cropTL != cropTL || old.cropTR != cropTR;
 }

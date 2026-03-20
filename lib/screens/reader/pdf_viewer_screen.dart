@@ -475,16 +475,17 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
                                 child: Column(
                                   mainAxisAlignment: MainAxisAlignment.center,
                                   crossAxisAlignment: CrossAxisAlignment.start,
+                                  mainAxisSize: MainAxisSize.min,
                                   children: [
                                     Text(
                                       score.title,
-                                      style: const TextStyle(color: Colors.white, fontSize: 18),
+                                      style: const TextStyle(color: Colors.white, fontSize: 17),
                                       overflow: TextOverflow.ellipsis,
                                     ),
                                     if (widget.sourceScores.length > 1)
                                        Text(
                                          '${_currentIndex + 1} / ${widget.sourceScores.length}',
-                                         style: const TextStyle(color: Colors.white70, fontSize: 12),
+                                         style: const TextStyle(color: Colors.white70, fontSize: 11),
                                        ),
                                   ],
                                 ),

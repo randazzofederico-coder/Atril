@@ -197,7 +197,7 @@ class _PhotoScannerScreenState extends State<PhotoScannerScreen> {
       final tempPath = await PdfGenerator.saveTempPdf(pdfBytes);
 
       // 3. Import into library through the existing pipeline
-      await ImportRepository.importPdfFromExternalPath(
+      final score = await ImportRepository.importPdfFromExternalPath(
         sourcePath: tempPath,
         desiredTitle: finalTitle,
         targetFolderId: widget.targetFolderId,
@@ -212,7 +212,7 @@ class _PhotoScannerScreenState extends State<PhotoScannerScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('"$finalTitle" creado exitosamente')),
         );
-        Navigator.of(context).pop();
+        Navigator.of(context).pop(score.docId);
       }
     } catch (e) {
       if (mounted) {

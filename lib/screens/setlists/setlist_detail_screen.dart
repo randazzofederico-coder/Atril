@@ -4,6 +4,7 @@ import '../../data/app_data.dart';
 import '../../models/setlist.dart';
 import '../../models/score.dart';
 import 'add_to_setlist_screen.dart';
+import '../library/photo_scanner_screen.dart';
 import '../reader/live_setlist_screen.dart';
 import '../reader/pdf_viewer_screen.dart';
 
@@ -71,6 +72,18 @@ class _SetlistDetailScreenState extends State<SetlistDetailScreen> {
     AppData.addDocsToSetlist(setlist.setlistId, picked);
   }
 
+  Future<void> _addFromCamera(Setlist setlist) async {
+    final docId = await Navigator.of(context).push<String>(
+      MaterialPageRoute(
+        builder: (_) => const PhotoScannerScreen(targetFolderId: 'root'),
+      ),
+    );
+    if (!mounted) return;
+    if (docId == null) return;
+
+    AppData.addDocsToSetlist(setlist.setlistId, [docId]);
+  }
+
   Future<void> _removeDoc(Setlist setlist, Score score) async {
     final ok = await showDialog<bool>(
       context: context,
@@ -126,10 +139,35 @@ class _SetlistDetailScreenState extends State<SetlistDetailScreen> {
             actions: [
               // Acciones principales
               if (_isEditing) ...[
-                IconButton(
+                PopupMenuButton<String>(
                   tooltip: 'Agregar temas',
                   icon: const Icon(Icons.add),
-                  onPressed: () => _addToSetlist(setlist),
+                  onSelected: (value) {
+                    if (value == 'library') _addToSetlist(setlist);
+                    if (value == 'camera') _addFromCamera(setlist);
+                  },
+                  itemBuilder: (_) => [
+                    const PopupMenuItem(
+                      value: 'library',
+                      child: Row(
+                        children: [
+                          Icon(Icons.library_music, color: Colors.blueGrey),
+                          SizedBox(width: 12),
+                          Text('Desde Biblioteca'),
+                        ],
+                      ),
+                    ),
+                    const PopupMenuItem(
+                      value: 'camera',
+                      child: Row(
+                        children: [
+                          Icon(Icons.photo_camera, color: Colors.teal),
+                          SizedBox(width: 12),
+                          Text('Desde Cámara / Foto'),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
                 TextButton(
                   onPressed: () => setState(() => _isEditing = false),

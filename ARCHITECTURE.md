@@ -1,8 +1,8 @@
 # ARCHITECTURE.md — Atril Digital (Flutter)
 
-**Estado del Proyecto:** Consolidación — **v1.12.0 (Photo Scanner & Image Editor)**
+**Estado del Proyecto:** Consolidación — **v1.13.0 (True Homography & Scanner Optims)**
 **Fecha de Análisis:** Marzo 2026
-**Objetivo:** Importación desde cámara con edición de imagen pre-PDF.
+**Objetivo:** Importación desde cámara con rectificación proyectiva real (Homografía 3x3).
 
 ---
 
@@ -83,41 +83,27 @@ La base de datos (`AppDatabase`) define la estructura core:
 
 ### ✅ Implementado y Estable
 * **Sistema de Biblioteca:**
-    * Carpetas anidables infinitas.
-    * Breadcrumbs de navegación.
-    * CRUD completo (Renombrar, Mover, Borrar) para archivos y carpetas.
+    * Carpetas anidables infinitas y CRUD completo.
     * Importación de archivos sueltos y carpetas recursivas.
 * **Photo Scanner (Cámara → PDF):**
-    * Captura desde cámara y selección desde galería.
-    * Lista de páginas reordenable con drag & drop.
-    * **Editor de imagen pre-PDF** con 4 herramientas:
-        * Rotación (90° incremental).
-        * Blanco/Negro con umbral ajustable (pre-rendering software para uniformidad).
-        * Brillo y Contraste (sliders independientes, -100 a +100).
-        * Recorte con 4 handles arrastrables y overlay de regla de tercios.
-    * Persistencia de parámetros de edición al re-editar páginas.
-    * Generación de PDF multi-página vía `syncfusion_flutter_pdf`.
-* **Lector PDF:**
-    * Motor nativo rápido (**`pdfrx`**).
-    * **Navegación Intuitiva:** 
-        * Salto entre documentos (Siguiente/Anterior) manteniendo el contexto.
-        * **Scrubber Vertical:** Barra de desplazamiento lateral para documentos largos, optimizada para rendimiento (throttling) y desacoplada del renderizado para evitar saltos visuales.
-    * Scroll vertical continuo.
-* **Anotaciones:**
-    * Lápiz (color negro default, grosor ajustable 1–20px).
-    * Resaltador (amarillo transparente, grosor ajustable).
-    * Capas no destructivas por setlist.
+    * Lista de páginas reordenable con persistencia.
+    * **Editor con Corrección Proyectiva (Homografía 3x3)**:
+        * 4 handles independientes para rectificación de perspectiva real.
+        * Procesamiento en segundo plano (**Isolates / `compute`**) para evitar bloqueos de UI.
+        * **Bake Orientation**: Soporte nativo para fotos con rotación EXIF.
+        * Filtros optimizados de B/N, Umbral, Brillo y Contraste.
+    * Generación de PDF multi-página.
+* **Lector PDF (**`pdfrx`**):**
+    * Navegación entre documentos y **Scrubber Vertical** (throttled).
+    * Soporte para anotaciones con Lápiz y Resaltador por página/setlist.
 * **Setlists:**
-    * Creación y edición.
-    * Modo "Vivo" (navegación continuada entre partituras).
-* **Gestión de Archivos Robusta:**
-    * **Feedback de Progreso:** Indicadores visuales precisos en operaciones de larga duración (Borrado recursivo, Importación masiva, Backups).
-    * Validación de nombres duplicados y integridad referencial.
+    * CRUD y Modo "Vivo" (navegación fluida).
+* **Gestión de Archivos:**
+    * Feedback de progreso y validaciones de integridad.
 
 ### 🔮 Próximos Pasos
-* **B/N en tiempo real:** Optimizar el preview de umbral para que actualice durante el drag del slider (actualmente se renderiza al soltar).
-* **Corrección de Perspectiva:** Crop con 4 puntos libres + homografía para corregir fotos tomadas en ángulo.
 * **Nuevas Herramientas de Anotación:** Texto enriquecido, Formas geométricas, Sellos musicales.
+* **Sincronización Cloud:** Soporte opcional para Drive/Dropbox.
 
 ---
 
@@ -126,15 +112,11 @@ La base de datos (`AppDatabase`) define la estructura core:
 ```text
 lib/
 ├── data/
-│   ├── repositories/       # Lógica de Negocio (Library, Setlist, Import, PdfGenerator, etc.)
+│   ├── repositories/       # Lógica (Library, Setlist, Import, PdfGenerator, etc.)
 │   ├── app_data.dart       # Fachada Global (Orquestador)
 │   ├── app_database.dart   # Definición de Schema Drift
 │   └── library_storage.dart# Abstracción de FileSystem
 ├── models/                 # POJOs y Entidades (Score, Setlist, Stroke)
-├── screens/
-│   ├── library/            # Biblioteca + LibraryActions + PhotoScanner + ImageEditor
-│   ├── reader/             # Visor PDF + Capas de Anotación
-│   ├── setlists/           # Gestión de Listas
-│   └── settings/           # Configuración
+├── screens/                # Library, Reader, Setlists, Settings
 └── widgets/                # UI Components Reutilizables
 ```
