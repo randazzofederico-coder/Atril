@@ -34,12 +34,16 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
   bool _chromeVisible = true;
   bool _editMode = false;
   AnnotationTool _tool = AnnotationTool.pen;
+  Color _color = Colors.black;
+  double _width = 3.0;
   
   // Page Indicator state
   int _currentPage = 1;
   int _totalPages = 0;
   bool _pageHintVisible = false;
   Timer? _pageHintTimer;
+  int _lastJumpTime = 0; // Throttling helper
+  double? _draggedPage; // Tracks ephemeral slider value during drag to avoid fighting with onPageChanged
 
   // Navigation helpers
   bool get _canGoNextDoc => _currentIndex < widget.sourceScores.length - 1;
@@ -126,6 +130,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
     setState(() => _editMode = !_editMode);
     if (_editMode) {
       _setChromeVisible(true);
+      _loadToolPrefs(_tool);
     }
   }
 
@@ -152,10 +157,50 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
       }
   }
 
-  double get _toolWidth {
-    if (_tool == AnnotationTool.highlighter) return 14.0;
-    if (_tool == AnnotationTool.whiteout) return 10.0;
-    return 3.0; 
+  // --- Tool Color/Width Management ---
+
+  static Color _defaultColorForTool(AnnotationTool tool) {
+    switch (tool) {
+      case AnnotationTool.pen: return Colors.black;
+      case AnnotationTool.highlighter: return Colors.yellow;
+      case AnnotationTool.whiteout: return Colors.white;
+      case AnnotationTool.text: return Colors.black;
+      case AnnotationTool.stamp: return Colors.red;
+    }
+  }
+
+  static double _defaultWidthForTool(AnnotationTool tool) {
+    switch (tool) {
+      case AnnotationTool.pen: return 3.0;
+      case AnnotationTool.highlighter: return 14.0;
+      case AnnotationTool.whiteout: return 10.0;
+      default: return 3.0;
+    }
+  }
+
+  void _loadToolPrefs(AnnotationTool tool) {
+    final settings = AppData.settings;
+    final savedColor = settings.getAnnotationColor(tool.name);
+    final savedWidth = settings.getAnnotationWidth(tool.name);
+    setState(() {
+      _color = savedColor != null ? Color(savedColor) : _defaultColorForTool(tool);
+      _width = savedWidth ?? _defaultWidthForTool(tool);
+    });
+  }
+
+  void _onToolChanged(AnnotationTool tool) {
+    setState(() => _tool = tool);
+    _loadToolPrefs(tool);
+  }
+
+  void _onColorChanged(Color color) {
+    setState(() => _color = color);
+    AppData.settings.setAnnotationColor(_tool.name, color.toARGB32());
+  }
+
+  void _onWidthChanged(double width) {
+    setState(() => _width = width);
+    AppData.settings.setAnnotationWidth(_tool.name, width);
   }
 
   @override
@@ -171,7 +216,9 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
     final score = _currentScore;
     final topPadding = MediaQuery.of(context).viewPadding.top;
     final topBarBaseHeight = topPadding + kToolbarHeight;
-    final toolsHeight = _editMode ? 64.0 : 0.0;
+    // The toolbar height is dynamic (expands when options row is visible), but we use
+    // a reasonable estimate for layout calculations (scrubber position, etc.)
+    final toolsHeight = _editMode ? 56.0 : 0.0;
     final topBarTotalHeight = topBarBaseHeight + toolsHeight;
     final safeBottom = math.max(MediaQuery.of(context).padding.bottom, MediaQuery.of(context).viewPadding.bottom);
 
@@ -237,7 +284,8 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
                             pageIndex: pageNumber,
                             editable: _editMode,
                             tool: _tool,
-                            width: _toolWidth,
+                            width: _width,
+                            color: _color,
                             ignorePointers: !_editMode, // Pass-through gestures if not editing
                           )
                         ];
@@ -292,7 +340,61 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
               ),
               
               // 3. Navigation FABs (Bottom Right)
-              if (_chromeVisible && !_editMode)
+              if (_chromeVisible && !_editMode) ...[
+                  // Scrubber Vertical (Right Edge)
+                  if (_totalPages > 1)
+                     Positioned(
+                        right: 8, 
+                        top: topBarTotalHeight + 16,
+                        bottom: 16 + safeBottom + 220, // Clear all FABs
+                        child: RotatedBox(
+                          quarterTurns: 1, 
+                          child: SizedBox(
+                            width: double.infinity, 
+                            child: SliderTheme(
+                              data: SliderThemeData(
+                                trackHeight: 4, 
+                                trackShape: const RectangularSliderTrackShape(),
+                                thumbShape: const _VerticalScrubberThumbShape(
+                                  thumbWidth: 15, // Thinner visual width (was 30, then 20)
+                                  thumbHeight: 40, // Visual height (was 60, then 30 - maybe too short? 40 seems balanced)
+                                ),
+                                overlayShape: const RoundSliderOverlayShape(overlayRadius: 0),
+                                activeTrackColor: Colors.white.withValues(alpha: 0.15), 
+                                inactiveTrackColor: Colors.white.withValues(alpha: 0.05),
+                              ),
+                              child: Slider(
+                                value: (_draggedPage ?? _currentPage.toDouble()).clamp(1.0, _totalPages.toDouble()),
+                                min: 1.0,
+                                max: _totalPages.toDouble(),
+                                divisions: null, 
+                                onChangeStart: (val) {
+                                   setState(() => _draggedPage = val);
+                                },
+                                onChanged: (val) {
+                                  setState(() => _draggedPage = val);
+
+                                  final target = val.toInt();
+                                  if (target == _currentPage) return;
+                                  
+                                  // Simple throttling
+                                  final now = DateTime.now().millisecondsSinceEpoch;
+                                  if (now - _lastJumpTime > 64) { // ~15fps limit for updates
+                                      _lastJumpTime = now;
+                                      _controller?.goToPage(pageNumber: target);
+                                  }
+                                },
+                                onChangeEnd: (val) {
+                                    setState(() => _draggedPage = null);
+                                    // Ensure final position is reached
+                                    _controller?.goToPage(pageNumber: val.toInt());
+                                },
+                              ),
+                            ),
+                          ),
+                        ),
+                     ),
+
                   Positioned(
                     right: 16,
                     bottom: 16 + safeBottom,
@@ -344,6 +446,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
                       ],
                     ),
                   ),
+              ],
 
               // 4. Custom Top Bar
               AnimatedPositioned(
@@ -397,15 +500,16 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
                       ),
                       // Tools
                       if (_editMode)
-                        SizedBox(
-                          height: toolsHeight,
-                          child: AnnotationToolbar(
-                            selectedTool: _tool,
-                            onTypeChanged: (t) => setState(() => _tool = t),
-                            onUndo: () => _annotationController.undo(),
-                            onRedo: () => _annotationController.redo(),
-                            onClear: _confirmClearPage,
-                          ),
+                        AnnotationToolbar(
+                          selectedTool: _tool,
+                          selectedColor: _color,
+                          selectedWidth: _width,
+                          onTypeChanged: _onToolChanged,
+                          onColorChanged: _onColorChanged,
+                          onWidthChanged: _onWidthChanged,
+                          onUndo: () => _annotationController.undo(),
+                          onRedo: () => _annotationController.redo(),
+                          onClear: _confirmClearPage,
                         ),
                     ],
                   ),
@@ -416,5 +520,89 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
         );
       },
     );
+  }
+}
+
+// Custom Thumb Shape
+class _VerticalScrubberThumbShape extends SliderComponentShape {
+  final double thumbWidth;
+  final double thumbHeight;
+
+  const _VerticalScrubberThumbShape({
+    this.thumbWidth = 24,
+    this.thumbHeight = 48,
+  });
+
+  @override
+  Size getPreferredSize(bool isEnabled, bool isDiscrete) {
+    return Size(thumbHeight, thumbWidth); // Rotated! Height is 'width' in slider
+  }
+
+  @override
+  void paint(
+    PaintingContext context,
+    Offset center, {
+    required Animation<double> activationAnimation,
+    required Animation<double> enableAnimation,
+    required bool isDiscrete,
+    required TextPainter labelPainter,
+    required RenderBox parentBox,
+    required SliderThemeData sliderTheme,
+    required TextDirection textDirection,
+    required double value,
+    required double textScaleFactor,
+    required Size sizeWithOverflow,
+  }) {
+    final Canvas canvas = context.canvas;
+    
+    // Note: The slider is rotated 90 degrees.
+    // 'center' is the point on the track.
+    // To draw a "Vertical" thumb in a rotated slider, we need to draw it horizontally relative to the canvas.
+    // Slider is Horizontal (min left, max right). 
+    // Rotated 90 deg: Left is Top. Right is Bottom.
+    // So 'Left' (Min) -> 'Right' (Max) corresponds to Screen Top -> Screen Bottom.
+    // We want arrows pointing Up (Left in slider coords) and Down (Right in slider coords).
+    
+    final rRect = RRect.fromRectAndRadius(
+      Rect.fromCenter(center: center, width: thumbHeight, height: thumbWidth),
+      const Radius.circular(8),
+    );
+
+    final paint = Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.fill;
+
+    // Draw background
+    canvas.drawRRect(rRect, paint);
+
+    // Draw border
+    final borderPaint = Paint()
+      ..color = Colors.black26
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1;
+    canvas.drawRRect(rRect, borderPaint);
+
+    // Draw Arrows (Triangles)
+    // Remember: Left on Slider = Up on Screen. Right on Slider = Down on Screen.
+    // So we draw arrows pointing Left and Right relative to the thumb center.
+    final arrowPaint = Paint()
+      ..color = Colors.black87
+      ..style = PaintingStyle.fill;
+
+    // Arrow pointing Left (Screen Up)
+    final pathLeft = Path()
+      ..moveTo(center.dx - 6, center.dy)
+      ..lineTo(center.dx - 2, center.dy - 4)
+      ..lineTo(center.dx - 2, center.dy + 4)
+      ..close();
+    canvas.drawPath(pathLeft, arrowPaint);
+
+    // Arrow pointing Right (Screen Down)
+    final pathRight = Path()
+      ..moveTo(center.dx + 6, center.dy)
+      ..lineTo(center.dx + 2, center.dy - 4)
+      ..lineTo(center.dx + 2, center.dy + 4)
+      ..close();
+    canvas.drawPath(pathRight, arrowPaint);
   }
 }

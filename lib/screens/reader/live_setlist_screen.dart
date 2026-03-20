@@ -299,6 +299,7 @@ class _LiveSetlistScreenState extends State<LiveSetlistScreen> {
                           editable: false,
                           tool: AnnotationTool.pen,
                           width: 3.0,
+                          color: Colors.redAccent, // Not used in display-only mode
                           ignorePointers: true, // Deja pasar los toques
                         ),
                       ),

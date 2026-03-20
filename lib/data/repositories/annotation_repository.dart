@@ -15,16 +15,16 @@ class AnnotationRepository {
       pageIndex: pageIndex, 
       setlistId: setlistId
     );
-    return rows.map((r) => AnnotationStroke(
-      id: r.id,
-      docId: r.docId,
-      setlistId: r.setlistId,
-      pageIndex: r.pageIndex,
-      tool: AnnotationStroke.toolFromName(r.tool),
-      width: r.width,
-      pointsNorm: AnnotationStroke.decodePoints(r.pointsJson),
-      createdAtMs: r.createdAt,
-    )).toList();
+    return rows.map((r) => AnnotationStroke.fromDbMap({
+      'id': r.id,
+      'doc_id': r.docId,
+      'setlist_id': r.setlistId,
+      'page_index': r.pageIndex,
+      'tool': r.tool,
+      'width': r.width,
+      'points_json': r.pointsJson,
+      'created_at': r.createdAt,
+    })).toList();
   }
 
   static Future<void> insertAnnotationStroke(AnnotationStroke s) async {
@@ -36,7 +36,7 @@ class AnnotationRepository {
         pageIndex: Value(s.pageIndex),
         tool: Value(s.toolName),
         width: Value(s.width),
-        pointsJson: Value(AnnotationStroke.encodePoints(s.pointsNorm)),
+        pointsJson: Value(s.encodedPointsJson),
         createdAt: Value(s.createdAtMs),
       )
     );

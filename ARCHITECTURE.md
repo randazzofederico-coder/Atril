@@ -1,8 +1,8 @@
 # ARCHITECTURE.md — Atril Digital (Flutter)
 
-**Estado del Proyecto:** Consolidación — **v1.11.0 (Backup, Restore & UX Refinements)**
-**Fecha de Análisis:** Enero 2026
-**Objetivo:** Base sólida para la expansión de herramientas de edición.
+**Estado del Proyecto:** Consolidación — **v1.12.0 (Photo Scanner & Image Editor)**
+**Fecha de Análisis:** Marzo 2026
+**Objetivo:** Importación desde cámara con edición de imagen pre-PDF.
 
 ---
 
@@ -55,6 +55,7 @@ Contiene la lógica de negocio pura. Ubicación: `lib/data/repositories/`.
 * **`AnnotationRepository`:** Gestión de trazos de tinta y capas de dibujo.
 * **`SettingsRepository`:** Preferencias de usuario (Tema, Escala UI).
 * **`BackupManager`:** Lógica de compresión/descompresión (ZIP), exportación e importación de backups completos (`.atril`).
+* **`PdfGenerator`:** Generación de PDFs multi-página desde imágenes usando Syncfusion.
 
 #### **D. Capa de Persistencia**
 * **Base de Datos:** `drift` (SQLite). Esquema tipado y migraciones.
@@ -86,34 +87,37 @@ La base de datos (`AppDatabase`) define la estructura core:
     * Breadcrumbs de navegación.
     * CRUD completo (Renombrar, Mover, Borrar) para archivos y carpetas.
     * Importación de archivos sueltos y carpetas recursivas.
+* **Photo Scanner (Cámara → PDF):**
+    * Captura desde cámara y selección desde galería.
+    * Lista de páginas reordenable con drag & drop.
+    * **Editor de imagen pre-PDF** con 4 herramientas:
+        * Rotación (90° incremental).
+        * Blanco/Negro con umbral ajustable (pre-rendering software para uniformidad).
+        * Brillo y Contraste (sliders independientes, -100 a +100).
+        * Recorte con 4 handles arrastrables y overlay de regla de tercios.
+    * Persistencia de parámetros de edición al re-editar páginas.
+    * Generación de PDF multi-página vía `syncfusion_flutter_pdf`.
 * **Lector PDF:**
     * Motor nativo rápido (**`pdfrx`**).
-    * **Navegación tipo Playlist:** Salto entre documentos (Siguiente/Anterior) manteniendo el contexto (Carpeta/Setlist/Búsqueda).
-    * **Controles de Página:** Navegación rápida (FABs) para documentos largos.
+    * **Navegación Intuitiva:** 
+        * Salto entre documentos (Siguiente/Anterior) manteniendo el contexto.
+        * **Scrubber Vertical:** Barra de desplazamiento lateral para documentos largos, optimizada para rendimiento (throttling) y desacoplada del renderizado para evitar saltos visuales.
     * Scroll vertical continuo.
+* **Anotaciones:**
+    * Lápiz (color negro default, grosor ajustable 1–20px).
+    * Resaltador (amarillo transparente, grosor ajustable).
+    * Capas no destructivas por setlist.
 * **Setlists:**
     * Creación y edición.
     * Modo "Vivo" (navegación continuada entre partituras).
-* **Anotaciones / Edición:**
-    * **Modo Edición Estricto:** Separación clara entre Navegación (Zoom/Pan) y Edición (Dibujo) para evitar conflictos táctiles.
-    * **Herramientas:** Lápiz, Resaltador (Highlighter), Borrador (Whiteout), Texto y Sellos (Stamps).
-    * **Persistencia no destructiva:** Capa `AnnotationLayer` sobre el PDF original.
-    * **Gestión:** Undo/Redo en memoria y borrado de página.
-* **UI & UX:**
-    * Modo Oscuro / Claro dinámico.
-    * Escalado de UI (Accesibilidad).
-    * Feedback visual en operaciones largas.
-* **Backup & Data:**
-    * **Backup Completo:** Archivo `.atril` (Base de datos + Documentos).
-    * **Exportación PC:** ZIP estándar con estructura de carpetas legible.
-    * **Restauración:** Proceso destructivo con *reset* de navegación para evitar estados inconsistentes.
-    * **Integridad:** Validación de nombres duplicados en carpetas (Bloqueo en UI manual, Auto-rename en imports).
+* **Gestión de Archivos Robusta:**
+    * **Feedback de Progreso:** Indicadores visuales precisos en operaciones de larga duración (Borrado recursivo, Importación masiva, Backups).
+    * Validación de nombres duplicados y integridad referencial.
 
-### 🚧 En Desarrollo / Próximos Pasos (Editing Tools)
-El foco ahora se mueve a herramientas de edición avanzada y refinamiento del "Modo Sesionista":
-1.  **Edición Quirúrgica:** Crop, Deskew, Reordenar páginas (manipulación real del PDF).
-2.  **Anotaciones Avanzadas:** Refinamiento de UX de texto y sellos.
-3.  **Metadatos Avanzados:** Tags, Tonalidad, BPM.
+### 🔮 Próximos Pasos
+* **B/N en tiempo real:** Optimizar el preview de umbral para que actualice durante el drag del slider (actualmente se renderiza al soltar).
+* **Corrección de Perspectiva:** Crop con 4 puntos libres + homografía para corregir fotos tomadas en ángulo.
+* **Nuevas Herramientas de Anotación:** Texto enriquecido, Formas geométricas, Sellos musicales.
 
 ---
 
@@ -122,13 +126,13 @@ El foco ahora se mueve a herramientas de edición avanzada y refinamiento del "M
 ```text
 lib/
 ├── data/
-│   ├── repositories/       # Lógica de Negocio (Library, Setlist, Import, etc.)
+│   ├── repositories/       # Lógica de Negocio (Library, Setlist, Import, PdfGenerator, etc.)
 │   ├── app_data.dart       # Fachada Global (Orquestador)
 │   ├── app_database.dart   # Definición de Schema Drift
 │   └── library_storage.dart# Abstracción de FileSystem
 ├── models/                 # POJOs y Entidades (Score, Setlist, Stroke)
 ├── screens/
-│   ├── library/            # Pantallas de Biblioteca + LibraryActions
+│   ├── library/            # Biblioteca + LibraryActions + PhotoScanner + ImageEditor
 │   ├── reader/             # Visor PDF + Capas de Anotación
 │   ├── setlists/           # Gestión de Listas
 │   └── settings/           # Configuración

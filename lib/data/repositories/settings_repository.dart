@@ -104,4 +104,28 @@ class SettingsRepository {
     invertPdfColors.value = enable;
     await _prefs.setBool(_keyInvertPdfColors, enable);
   }
+
+  // --- Annotation Tool Preferences ---
+  static const String _keyAnnotationColor = 'annotation_color_';
+  static const String _keyAnnotationWidth = 'annotation_width_';
+
+  /// Load the last-used color for a tool. Returns null if not set.
+  int? getAnnotationColor(String toolName) {
+    return _prefs.getInt('$_keyAnnotationColor$toolName');
+  }
+
+  /// Load the last-used width for a tool. Returns null if not set.
+  double? getAnnotationWidth(String toolName) {
+    return _prefs.getDouble('$_keyAnnotationWidth$toolName');
+  }
+
+  /// Save the last-used color for a tool.
+  Future<void> setAnnotationColor(String toolName, int colorValue) async {
+    await _prefs.setInt('$_keyAnnotationColor$toolName', colorValue);
+  }
+
+  /// Save the last-used width for a tool.
+  Future<void> setAnnotationWidth(String toolName, double width) async {
+    await _prefs.setDouble('$_keyAnnotationWidth$toolName', width);
+  }
 }

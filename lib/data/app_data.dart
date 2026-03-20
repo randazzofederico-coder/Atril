@@ -304,13 +304,22 @@ class AppData {
   }
   
   static Future<void> deleteItems({required List<String> docIds, required List<String> folderIds}) async {
-    backgroundTaskProgress.value = const BackgroundTaskStatus(0.0, 'Eliminando items...');
+    // 1. Calculate total items to delete for progress
+    final total = LibraryRepository.countItems(docIds: docIds, folderIds: folderIds);
+    
+    backgroundTaskProgress.value = const BackgroundTaskStatus(0.0, 'Eliminando...');
     try {
-      await LibraryRepository.deleteItems(docIds: docIds, folderIds: folderIds);
-      // Simulating progress or just indefinite? 
-      // Repository call is one-shot. 
-      // User wants feedback. The spinner is good, but text is strictly requested "Misma logica...".
-      // Since we don't know progress inside repo, we just show "Eliminando..."
+      await LibraryRepository.deleteItems(
+        docIds: docIds, 
+        folderIds: folderIds,
+        onProgress: (completed) {
+          final p = total > 0 ? (completed / total) : 1.0;
+          backgroundTaskProgress.value = BackgroundTaskStatus(
+            p.clamp(0.0, 1.0), 
+            'Eliminando... ${(p * 100).toInt()}%'
+          );
+        }
+      );
       await refreshLibrary();
     } finally {
       backgroundTaskProgress.value = null;

@@ -108,6 +108,7 @@ class AnnotationLayer extends StatefulWidget {
 
   final AnnotationTool tool;
   final double width;
+  final Color color;
 
   /// If true, the layer will ignore pointer events (display-only).
   final bool ignorePointers;
@@ -120,6 +121,7 @@ class AnnotationLayer extends StatefulWidget {
     required this.editable,
     required this.tool,
     required this.width,
+    required this.color,
     this.setlistId,
     this.ignorePointers = false,
   });
@@ -194,6 +196,7 @@ class _AnnotationLayerState extends State<AnnotationLayer> {
       pageIndex: widget.pageIndex,
       tool: widget.tool,
       width: widget.width,
+      color: widget.color,
       pointsNorm: pointsNorm,
       createdAtMs: DateTime.now().millisecondsSinceEpoch,
     );
@@ -231,6 +234,7 @@ class _AnnotationLayerState extends State<AnnotationLayer> {
             draftPoints: _draftPoints,
             draftTool: widget.tool,
             draftWidth: widget.width,
+            draftColor: widget.color,
           ),
           size: Size.infinite,
         );
@@ -355,7 +359,7 @@ class _AnnotationLayerState extends State<AnnotationLayer> {
       tool: tool,
       width: 0, // Not used for text/stamp
       pointsNorm: [pos],
-      color: Colors.black, // Default color for now
+      color: widget.color,
       content: content,
       createdAtMs: DateTime.now().millisecondsSinceEpoch,
     );
@@ -376,12 +380,14 @@ class _AnnotationPainter extends CustomPainter {
   final List<Offset>? draftPoints;
   final AnnotationTool? draftTool;
   final double? draftWidth;
+  final Color? draftColor;
 
   _AnnotationPainter({
     required this.strokes,
     required this.draftPoints,
     this.draftTool,
     this.draftWidth,
+    this.draftColor,
   });
 
   @override
@@ -397,7 +403,7 @@ class _AnnotationPainter extends CustomPainter {
     if (dp != null && dp.length >= 2 && draftTool != null) {
        final tool = draftTool!;
        final width = draftWidth ?? 2.0;
-       final color = _defaultColorForTool(tool);
+       final color = draftColor ?? _defaultColorForTool(tool);
 
        _paintStroke(canvas, size, tool, width, dp, color);
     }
@@ -423,8 +429,8 @@ class _AnnotationPainter extends CustomPainter {
 
   Color _defaultColorForTool(AnnotationTool tool) {
     switch (tool) {
-      case AnnotationTool.pen: return Colors.redAccent;
-      case AnnotationTool.highlighter: return Colors.yellow.withValues(alpha: 0.40);
+      case AnnotationTool.pen: return Colors.black;
+      case AnnotationTool.highlighter: return Colors.yellow;
       case AnnotationTool.whiteout: return Colors.white;
       default: return Colors.black;
     }
@@ -446,7 +452,9 @@ class _AnnotationPainter extends CustomPainter {
       ..strokeCap = StrokeCap.round
       ..strokeJoin = StrokeJoin.round
       ..isAntiAlias = true
-      ..color = color;
+      ..color = tool == AnnotationTool.highlighter
+          ? color.withValues(alpha: 0.40)  // Highlighter always semi-transparent
+          : color;
     
     // Whiteout logic
     if (tool == AnnotationTool.whiteout) {

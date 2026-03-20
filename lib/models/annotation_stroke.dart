@@ -95,10 +95,20 @@ class AnnotationStroke {
         }
       } catch (_) { /* ignore corruption */ }
     } else {
-      // Decode Array (Legacy Strokes)
-      pts = _decodePoints(rawJson);
-      // Try to recover color if stored in future/legacy versions?? 
-      // Current v1 had hardcoded colors in painter.
+      // Decode Strokes: new object format or legacy array
+      try {
+        final raw = jsonDecode(rawJson);
+        if (raw is Map<String, dynamic>) {
+          // New format: {"points": [...], "color": 0xFF...}
+          pts = _decodePoints(jsonEncode(raw['points']));
+          if (raw.containsKey('color')) col = Color(raw['color'] as int);
+        } else {
+          // Legacy array format: [[x,y], ...]
+          pts = _decodePoints(rawJson);
+        }
+      } catch (_) {
+        pts = _decodePoints(rawJson);
+      }
     }
 
     return AnnotationStroke(
@@ -117,9 +127,10 @@ class AnnotationStroke {
 
   // ---------------- Serialization helpers ----------------
 
+  /// Public accessor for the fully-encoded points_json value (used by Repository).
+  String get encodedPointsJson => _encodeData();
+
   static String encodePoints(List<Offset> pts) {
-    // Legacy support: Only for array based strokes. 
-    // New logic uses _encodeData internally, but this is kept for Repository compatibility if needed
     final arr = pts.map((p) => [p.dx, p.dy]).toList(growable: false);
     return jsonEncode(arr);
   }
@@ -140,7 +151,14 @@ class AnnotationStroke {
       if (color != null) map['color'] = color!.toARGB32();
       return jsonEncode(map);
     } else {
-      // Store as array (Backward compatibility for strokes)
+      // Strokes: use object format if color is set, else legacy array
+      if (color != null) {
+        final map = <String, dynamic>{
+          'points': pointsNorm.map((p) => [p.dx, p.dy]).toList(growable: false),
+          'color': color!.toARGB32(),
+        };
+        return jsonEncode(map);
+      }
       return encodePoints(pointsNorm);
     }
   }

@@ -4,6 +4,7 @@ import '../../models/setlist.dart';
 import '../../widgets/score_import_logic.dart';
 import '../../widgets/rename_folder_dialog.dart';
 import 'folder_picker_screen.dart';
+import 'photo_scanner_screen.dart';
 
 /// Clase utilitaria estática para manejar las acciones de negocio de la Biblioteca.
 /// Esto descarga de responsabilidad a la pantalla principal (UI).
@@ -47,6 +48,27 @@ class LibraryActions {
                   Icon(Icons.folder, color: Colors.amber),
                   SizedBox(width: 12),
                   Text('Carpeta completa'),
+                ],
+              ),
+            ),
+          ),
+          SimpleDialogOption(
+            onPressed: () {
+              Navigator.pop(ctx);
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => PhotoScannerScreen(targetFolderId: currentFolderId),
+                ),
+              );
+            },
+            child: const Padding(
+              padding: EdgeInsets.symmetric(vertical: 8.0),
+              child: Row(
+                children: [
+                  Icon(Icons.photo_camera, color: Colors.teal),
+                  SizedBox(width: 12),
+                  Text('Desde Cámara / Foto'),
                 ],
               ),
             ),

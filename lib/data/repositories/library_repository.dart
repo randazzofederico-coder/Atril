@@ -174,32 +174,65 @@ class LibraryRepository {
     // NOTA: El llamador es responsable de actualizar el estado local (AppData) o refrescar.
   }
 
+  static int countItems({required List<String> docIds, required List<String> folderIds}) {
+    int total = docIds.length;
+    // Count folders and their contents
+    for (final fId in folderIds) {
+      total += 1; // The folder itself
+      total += _countDocsInFolderRecursive(fId);
+    }
+    return total;
+  }
+
+  static int _countDocsInFolderRecursive(String folderId) {
+    int count = 0;
+    // Direct docs
+    count += AppData.library.where((s) => s.folderId == folderId).length;
+    // Subfolders
+    final subFolders = AppData.folders.where((f) => f.parentId == folderId);
+    count += subFolders.length;
+    for (final sub in subFolders) {
+      count += _countDocsInFolderRecursive(sub.id);
+    }
+    return count;
+  }
+
   static Future<void> deleteItems({
     required List<String> docIds,
     required List<String> folderIds,
+    Function(int)? onProgress,
   }) async {
+    int deletedCount = 0;
+    void tick() {
+      deletedCount++;
+      if (onProgress != null) onProgress(deletedCount);
+    }
+
     for (final id in docIds) {
       await deleteScore(id);
+      tick();
     }
     for (final id in folderIds) {
-      await _deleteFolderRecursive(id);
+      await _deleteFolderRecursive(id, onProgress: tick);
     }
     // NOTA: El llamador es responsable de refrescar.
   }
 
-  static Future<void> _deleteFolderRecursive(String folderId) async {
+  static Future<void> _deleteFolderRecursive(String folderId, {required Function() onProgress}) async {
     // Borrar subcarpetas
     final childrenF = AppData.folders.where((f) => f.parentId == folderId).toList();
     for (final child in childrenF) {
-      await _deleteFolderRecursive(child.id);
+      await _deleteFolderRecursive(child.id, onProgress: onProgress);
     }
     // Borrar docs dentro
     final childrenD = AppData.library.where((d) => d.folderId == folderId).toList();
     for (final doc in childrenD) {
       await deleteScore(doc.docId);
+      onProgress();
     }
     // Borrar la carpeta en sí
     await AppData.db.deleteFolder(folderId);
+    onProgress();
   }
 
   static Future<void> deleteScore(String docId) async {
