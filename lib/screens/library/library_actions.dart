@@ -4,6 +4,7 @@ import '../../models/setlist.dart';
 import '../../widgets/score_import_logic.dart';
 import '../../widgets/rename_folder_dialog.dart';
 import 'folder_picker_screen.dart';
+import 'pdf_page_editor_screen.dart';
 import 'photo_scanner_screen.dart';
 
 /// Clase utilitaria estática para manejar las acciones de negocio de la Biblioteca.
@@ -139,6 +140,19 @@ class LibraryActions {
        // Llamamos a la nueva función de AppData
        await AppData.updateScoreMetadata(docId, finalTitle, finalAuthor);
     }
+  }
+
+  /// Opens the PDF page editor for the given document.
+  static void editPdfPages(BuildContext context, String docId) {
+    final score = AppData.getScoreById(docId);
+    if (score == null || score.filePath == null) return;
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => PdfPageEditorScreen(score: score),
+      ),
+    );
   }
 
   static Future<void> renameFolder(BuildContext context, String folderId) async {

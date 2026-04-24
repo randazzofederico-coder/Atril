@@ -10,6 +10,7 @@ import 'annotation_toolbar.dart';
 import '../../models/annotation_stroke.dart';
 import '../../models/score.dart';
 import '../../data/app_data.dart';
+import '../library/pdf_page_editor_screen.dart';
 
 class PdfViewerScreen extends StatefulWidget {
   final List<Score> sourceScores;
@@ -490,10 +491,23 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
                                   ],
                                 ),
                               ),
+                              if (!_editMode)
+                                IconButton(
+                                  onPressed: () {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) => PdfPageEditorScreen(score: score),
+                                      ),
+                                    );
+                                  },
+                                  icon: const Icon(Icons.auto_stories, color: Colors.white),
+                                  tooltip: 'Editar Páginas',
+                                ),
                               IconButton(
                                 onPressed: _toggleEditMode,
                                 icon: Icon(_editMode ? Icons.edit_off : Icons.edit, color: Colors.white),
-                                tooltip: _editMode ? 'Salir' : 'Editar',
+                                tooltip: _editMode ? 'Salir' : 'Anotar',
                               ),
                             ],
                           ),

@@ -13,7 +13,7 @@
   <img src="https://img.shields.io/badge/Platform-Android%20|%20Windows%20|%20Web-green?logo=android" alt="Platform"/>
   <img src="https://img.shields.io/badge/Firebase-Auth%20%2B%20Firestore-FFCA28?logo=firebase" alt="Firebase"/>
   <img src="https://img.shields.io/badge/License-Private-lightgrey" alt="License"/>
-  <img src="https://img.shields.io/badge/Version-1.0.0+3-orange" alt="Version"/>
+  <img src="https://img.shields.io/badge/Version-1.15.0-orange" alt="Version"/>
 </p>
 
 ---
@@ -49,6 +49,15 @@
 - **Compresión inteligente**: pass-through directo de JPEGs sin re-codificar para evitar degradación; solo re-procesa imágenes que exceden 300 DPI.
 - **Procesamiento de imagen**: rotación, blanco/negro con umbral configurable, brillo y contraste.
 - Soporte nativo para fotos con rotación EXIF (`bakeOrientation`).
+
+### ✂️ Editor de Páginas PDF
+- **Reordenar páginas** con drag & drop (misma UX que el escáner).
+- **Eliminar páginas** individuales de un PDF existente.
+- **Agregar páginas** desde cámara, galería, u otro PDF de la biblioteca.
+- **Preservación sin pérdida**: las páginas originales se copian via `PdfTemplate` de Syncfusion, sin re-codificar.
+- Thumbnails renderizados progresivamente desde el PDF (pdfrx + package:image).
+- Regeneración de PDF en background con progreso global.
+- Accesible desde el **menú contextual** de la biblioteca y desde el **visor PDF**.
 
 ### 📄 Lector PDF
 - Motor de renderizado rápido (`pdfrx`) con scroll vertical continuo.
@@ -144,7 +153,8 @@ lib/
 │       ├── import_repository.dart       # Ingesta de PDFs y carpetas
 │       ├── annotation_repository.dart   # Trazos de tinta vectoriales
 │       ├── settings_repository.dart     # Preferencias (tema, escala, etc.)
-│       └── pdf_generator.dart           # Generación de PDF desde imágenes
+│       ├── pdf_generator.dart           # Generación de PDF desde imágenes
+│       └── pdf_manipulator.dart         # Edición estructural de PDFs (reorder, delete, insert)
 ├── models/
 │   ├── score.dart             # Modelo de partitura
 │   ├── folder.dart            # Modelo de carpeta
@@ -157,7 +167,7 @@ lib/
 │   ├── login_screen.dart      # Login (Google + email/contraseña)
 │   ├── onboarding_screen.dart # Registro de perfil para usuarios nuevos
 │   ├── home_shell.dart        # Shell con NavigationBar (Biblioteca / Setlists)
-│   ├── library/               # Pantallas de biblioteca, scanner, editor de imagen
+│   ├── library/               # Pantallas de biblioteca, scanner, editor de imagen, editor de páginas PDF
 │   ├── reader/                # Visor PDF, capa de anotaciones, toolbar
 │   ├── setlists/              # CRUD de setlists, detalle, modo vivo
 │   ├── settings/              # Configuración general

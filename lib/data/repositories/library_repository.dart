@@ -410,6 +410,12 @@ class LibraryRepository {
     }
   }
 
+  /// Invalidates the cached page count for a specific path.
+  /// Call this after modifying a PDF (adding/removing pages).
+  static void invalidatePageCountCache(String path) {
+    _pagesCountCache.remove(path);
+  }
+
   static int getLastPageForDocId(String docId) => _lastPageCache[docId] ?? 1;
 
   static void setLastPageForDocId(String docId, int page) {

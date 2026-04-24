@@ -1,8 +1,8 @@
 # ARCHITECTURE.md — Atril Digital (Flutter)
 
-**Estado del Proyecto:** Consolidación — **v1.14.0 (Recycle Bin & Trash Management)**
-**Fecha de Análisis:** Marzo 2026
-**Objetivo:** Importación desde cámara con rectificación proyectiva real (Homografía 3x3).
+**Estado del Proyecto:** Consolidación — **v1.15.0 (PDF Page Editor)**
+**Fecha de Análisis:** Abril 2026
+**Objetivo:** Editor de estructura de PDF: reordenar, eliminar y agregar páginas.
 
 ---
 
@@ -56,6 +56,7 @@ Contiene la lógica de negocio pura. Ubicación: `lib/data/repositories/`.
 * **`SettingsRepository`:** Preferencias de usuario (Tema, Escala UI).
 * **`BackupManager`:** Lógica de compresión/descompresión (ZIP), exportación e importación de backups completos (`.atril`).
 * **`PdfGenerator`:** Generación de PDFs multi-página desde imágenes usando Syncfusion.
+* **`PdfManipulator`:** Manipulación de estructura de PDFs existentes: renderizado de thumbnails (pdfrx), reordenamiento y eliminación de páginas (Syncfusion templates), inserción de nuevas páginas de imagen.
 
 #### **D. Capa de Persistencia**
 * **Base de Datos:** `drift` (SQLite). Esquema tipado y migraciones.
@@ -97,6 +98,14 @@ La base de datos (`AppDatabase`) define la estructura core:
         * Filtros optimizados de B/N, Umbral, Brillo y Contraste.
     * **PdfGenerator** con compresión inteligente: pass-through de JPEGs sin re-codificar, solo re-procesa si excede 300 DPI.
     * Creación de PDF en background con progreso global (`AppData.backgroundTaskProgress`).
+* **Editor de Páginas PDF (Edición Estructural):**
+    * **Reordenar** páginas con drag & drop (`ReorderableListView`).
+    * **Eliminar** páginas individuales con un tap.
+    * **Agregar páginas** desde cámara, galería, u otro PDF de la biblioteca.
+    * Thumbnails renderizados progresivamente desde el PDF original (pdfrx + package:image).
+    * Preservación sin pérdida de páginas originales via `PdfTemplate` de Syncfusion.
+    * Regeneración de PDF en background con progreso global.
+    * Accesible desde el menú contextual de la biblioteca y desde el visor PDF.
 * **Lector PDF (**`pdfrx`**):**
     * Navegación entre documentos y **Scrubber Vertical** (throttled).
     * Soporte para anotaciones con Lápiz y Resaltador por página/setlist.

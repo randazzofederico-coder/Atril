@@ -320,6 +320,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                 onDocAction: (docId, action) {
                    if (action == 'delete') LibraryActions.deleteScore(context, docId);
                    if (action == 'rename') LibraryActions.editScoreMetadata(context, docId);
+                   if (action == 'edit_pages') LibraryActions.editPdfPages(context, docId);
                 },
               ),
             ),
