@@ -43,3 +43,25 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Firebase credentials — NEVER commit these
+**/google-services.json
+**/GoogleService-Info.plist
+firebase_options.dart
+
+# Environment / secrets
+.env
+.env.*
+*.env
+
+# Release builds — binaries should not be in the repo
+/release/
+*.apk
+*.aab
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Flutter plugins metadata
+.flutter-plugins

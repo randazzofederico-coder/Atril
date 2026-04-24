@@ -1,7 +1,10 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../data/backup_manager.dart';
 import '../../data/app_data.dart';
+import '../../data/repositories/settings_repository.dart';
 import '../trash/trash_bin_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -151,11 +154,63 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
                 const Divider(),
 
+                _buildSectionHeader('Sesión'),
+                _buildSessionSection(),
+                const Divider(),
+
+                // Logout button
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  child: SizedBox(
+                    width: double.infinity,
+                    height: 48,
+                    child: OutlinedButton.icon(
+                      onPressed: _doLogout,
+                      icon: const Icon(Icons.logout_rounded, size: 20),
+                      label: const Text(
+                        'Cerrar sesión',
+                        style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.redAccent,
+                        side: const BorderSide(color: Colors.redAccent, width: 1.5),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                
+                // Delete account button
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  child: SizedBox(
+                    width: double.infinity,
+                    height: 48,
+                    child: OutlinedButton.icon(
+                      onPressed: _doDeleteAccount,
+                      icon: const Icon(Icons.delete_forever, size: 20),
+                      label: const Text(
+                        'Eliminar cuenta',
+                        style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.red,
+                        side: const BorderSide(color: Colors.red, width: 1.5),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+
                 const Padding(
                   padding: EdgeInsets.all(24.0),
                   child: Center(
                     child: Text(
-                      'v1.2 - Atril Digital',
+                      'v1.0.0 - Atril Digital',
                       style: TextStyle(color: Colors.grey),
                     ),
                   ),
@@ -314,6 +369,155 @@ class _SettingsScreenState extends State<SettingsScreen> {
       }
     } finally {
       if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Widget _buildSessionSection() {
+    final cache = SettingsRepository.instance.loadPermissionCache();
+
+    if (cache == null) {
+      return const ListTile(
+        leading: Icon(Icons.cloud_off, color: Colors.grey),
+        title: Text('Sin verificación'),
+        subtitle: Text('Conectate a internet para verificar tu acceso'),
+      );
+    }
+
+    final d = cache.lastVerified;
+    const meses = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+    final lastDate = '${d.day} de ${meses[d.month - 1]} de ${d.year}';
+    final daysLeft = cache.daysUntilExpiry;
+
+    // Status color
+    final Color statusColor;
+    final IconData statusIcon;
+    final String statusText;
+
+    if (daysLeft <= 0) {
+      statusColor = Colors.redAccent;
+      statusIcon = Icons.error_outline;
+      statusText = 'Expirado — conectate a internet';
+    } else if (daysLeft <= 5) {
+      statusColor = const Color(0xFFF59E0B);
+      statusIcon = Icons.warning_amber_rounded;
+      statusText = '$daysLeft ${daysLeft == 1 ? 'día' : 'días'} restantes';
+    } else {
+      statusColor = const Color(0xFF4CAF50);
+      statusIcon = Icons.check_circle_outline;
+      statusText = '$daysLeft días restantes';
+    }
+
+    return Column(
+      children: [
+        ListTile(
+          leading: const Icon(Icons.verified_user_outlined),
+          title: const Text('Última verificación online'),
+          subtitle: Text(lastDate),
+        ),
+        ListTile(
+          leading: Icon(statusIcon, color: statusColor),
+          title: const Text('Próxima verificación requerida'),
+          subtitle: Text(
+            statusText,
+            style: TextStyle(color: statusColor, fontWeight: FontWeight.w600),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _doLogout() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Cerrar sesión'),
+        content: const Text(
+          '¿Estás seguro que querés cerrar sesión?\n\n'
+          'Tu biblioteca de partituras NO se borra. '
+          'Vas a necesitar iniciar sesión de nuevo para acceder.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Cerrar sesión'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    await SettingsRepository.instance.clearPermissionCache();
+    await FirebaseAuth.instance.signOut();
+
+    // Pop back to root — AuthGate will handle the rest
+    if (mounted) {
+      Navigator.of(context).popUntil((route) => route.isFirst);
+    }
+  }
+
+  Future<void> _doDeleteAccount() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Eliminar cuenta'),
+        content: const Text(
+          '¿Estás seguro que deseas eliminar tu cuenta de forma permanente?\n\n'
+          'Esta acción no se puede deshacer y perderás todos tus datos asociados a esta cuenta.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Eliminar'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user != null) {
+        await FirebaseFirestore.instance.collection('usuarios').doc(user.uid).delete();
+        await user.delete();
+      }
+      await SettingsRepository.instance.clearPermissionCache();
+      if (mounted) {
+        Navigator.of(context).popUntil((route) => route.isFirst);
+      }
+    } on FirebaseAuthException catch (e) {
+      if (e.code == 'requires-recent-login' && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Por seguridad, debes volver a iniciar sesión antes de eliminar tu cuenta.'),
+            duration: Duration(seconds: 5),
+          ),
+        );
+        await SettingsRepository.instance.clearPermissionCache();
+        await FirebaseAuth.instance.signOut();
+        if (mounted) {
+          Navigator.of(context).popUntil((route) => route.isFirst);
+        }
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error al eliminar: ${e.message}')));
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error inesperado: $e')));
+      }
     }
   }
 }

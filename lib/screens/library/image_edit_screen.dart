@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'dart:io';
+import 'dart:isolate';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
@@ -36,10 +38,30 @@ class ImageEditParams {
 }
 
 /// Result returned by the editor.
+///
+/// For perspective warps, the editor returns immediately with the original
+/// image path and sets [needsBackgroundProcessing] = true. The caller can
+/// invoke [backgroundProcessor] to run the heavy Isolate work without
+/// blocking the editor UI.
 class ImageEditResult {
   final String editedPath;
   final ImageEditParams params;
-  const ImageEditResult(this.editedPath, this.params);
+
+  /// If true, [editedPath] is a temporary/original path and the real
+  /// processed image will be produced by [backgroundProcessor].
+  final bool needsBackgroundProcessing;
+
+  /// Callback that runs the heavy perspective warp in an Isolate.
+  /// Accepts an optional [onProgress] callback (0.0–1.0) for UI updates.
+  /// Returns the final processed image path.
+  final Future<String> Function(void Function(double progress) onProgress)? backgroundProcessor;
+
+  const ImageEditResult(
+    this.editedPath,
+    this.params, {
+    this.needsBackgroundProcessing = false,
+    this.backgroundProcessor,
+  });
 }
 
 /// Params passed to the background island for heavy image processing.
@@ -240,20 +262,45 @@ class _ImageEditScreenState extends State<ImageEditScreen> {
     final uiImg = _loadedImage;
     if (uiImg == null) return;
 
-    setState(() => _isProcessing = true);
+    final bool needsPerspective = !_isRectCrop && !_isFullCrop;
 
-    try {
-      final editedPath = await _renderFinalImage(uiImg);
-      if (mounted) {
-        Navigator.of(context).pop(ImageEditResult(editedPath, _currentParams));
-      }
-    } catch (e, stack) {
-      debugPrint('Error procesando imagen: $e\n$stack');
-      if (mounted) {
-        setState(() => _isProcessing = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
-        );
+    if (needsPerspective) {
+      // Perspective warp: return immediately, process in background.
+      // We pass the original image path as a placeholder; the caller
+      // will invoke backgroundProcessor() to get the real output.
+      final params = _currentParams;
+      final sourcePath = widget.imagePath;
+      final srcW = uiImg.width;
+      final srcH = uiImg.height;
+
+      Navigator.of(context).pop(ImageEditResult(
+        sourcePath, // placeholder — will be replaced after bg processing
+        params,
+        needsBackgroundProcessing: true,
+        backgroundProcessor: (onProgress) => _runPerspectiveInBackground(
+          sourcePath: sourcePath,
+          srcW: srcW,
+          srcH: srcH,
+          params: params,
+          onProgress: onProgress,
+        ),
+      ));
+    } else {
+      // Rect crop: fast path, process inline.
+      setState(() => _isProcessing = true);
+      try {
+        final editedPath = await _renderRectCrop(uiImg);
+        if (mounted) {
+          Navigator.of(context).pop(ImageEditResult(editedPath, _currentParams));
+        }
+      } catch (e, stack) {
+        debugPrint('Error procesando imagen: $e\n$stack');
+        if (mounted) {
+          setState(() => _isProcessing = false);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+          );
+        }
       }
     }
   }
@@ -266,33 +313,58 @@ class _ImageEditScreenState extends State<ImageEditScreen> {
       _cropTL == const Offset(0, 0) && _cropTR == const Offset(1, 0) &&
       _cropBL == const Offset(0, 1) && _cropBR == const Offset(1, 1);
 
-  Future<String> _renderFinalImage(ui.Image sourceImg) async {
-    final bool needsPerspective = !_isRectCrop && !_isFullCrop;
+  /// Runs the perspective warp in a background Isolate.
+  /// This is a static-compatible helper so it can be called after the
+  /// editor screen has already been popped.
+  static Future<String> _runPerspectiveInBackground({
+    required String sourcePath,
+    required int srcW,
+    required int srcH,
+    required ImageEditParams params,
+    required void Function(double progress) onProgress,
+  }) async {
+    final tempDir = Directory.systemTemp;
+    final tempPath = '${tempDir.path}/atril_edit_${DateTime.now().millisecondsSinceEpoch}.jpg';
 
-    if (needsPerspective) {
-      // Background isolate processing (avoids UI freeze/crashes on large images)
-      final tempDir = Directory.systemTemp;
-      final tempPath = '${tempDir.path}/atril_edit_${DateTime.now().millisecondsSinceEpoch}.jpg';
-      
-      final params = _PerspectiveProcessParams(
-        sourcePath: widget.imagePath,
-        tempPath: tempPath,
-        srcW: sourceImg.width,
-        srcH: sourceImg.height,
-        rotation: _rotation,
-        grayscale: _grayscale,
-        threshold: _threshold,
-        brightness: _brightness,
-        contrast: _contrast,
-        cropTL: _cropTL, cropTR: _cropTR,
-        cropBL: _cropBL, cropBR: _cropBR,
-      );
+    final isolateParams = _PerspectiveProcessParams(
+      sourcePath: sourcePath,
+      tempPath: tempPath,
+      srcW: srcW,
+      srcH: srcH,
+      rotation: params.rotation,
+      grayscale: params.grayscale,
+      threshold: params.threshold,
+      brightness: params.brightness,
+      contrast: params.contrast,
+      cropTL: params.cropTL, cropTR: params.cropTR,
+      cropBL: params.cropBL, cropBR: params.cropBR,
+    );
 
-      return await compute(_processPerspectiveIsolate, params);
-    } else {
-      // Fast Rect Crop path (dart:ui)
-      return _renderRectCrop(sourceImg);
-    }
+    // Use Isolate.spawn + ReceivePort so we can get progress updates
+    // from the pixel warp loop in real time.
+    final receivePort = ReceivePort();
+    final completer = Completer<String>();
+
+    await Isolate.spawn(
+      _processPerspectiveWithProgress,
+      _IsolateMessage(isolateParams, receivePort.sendPort),
+    );
+
+    receivePort.listen((message) {
+      if (message is double) {
+        // Progress update (0.0 – 1.0)
+        onProgress(message);
+      } else if (message is String) {
+        // Final result path
+        completer.complete(message);
+        receivePort.close();
+      } else if (message is List && message.first == 'error') {
+        completer.completeError(Exception(message.last));
+        receivePort.close();
+      }
+    });
+
+    return completer.future;
   }
 
   /// Fast path for simple rectangular crops using dart:ui (native/GPU).
@@ -347,12 +419,22 @@ class _ImageEditScreenState extends State<ImageEditScreen> {
 
     final picture = recorder.endRecording();
     final renderedImage = await picture.toImage(outW, outH);
-    final byteData = await renderedImage.toByteData(format: ui.ImageByteFormat.png);
+    // Encode as JPEG quality 95 instead of PNG to keep file size reasonable
+    // while preserving quality for sheet music.
+    final byteData = await renderedImage.toByteData(format: ui.ImageByteFormat.rawRgba);
     if (byteData == null) throw Exception('Null byteData');
 
+    // Convert raw RGBA to JPEG via package:image
+    final rawImg = img.Image.fromBytes(
+      width: outW, height: outH,
+      bytes: byteData.buffer,
+      order: img.ChannelOrder.rgba,
+    );
+    final jpegBytes = img.encodeJpg(rawImg, quality: 95);
+
     final tempDir = Directory.systemTemp;
-    final tempFile = File('${tempDir.path}/atril_edit_${DateTime.now().millisecondsSinceEpoch}.png');
-    await tempFile.writeAsBytes(byteData.buffer.asUint8List(), flush: true);
+    final tempFile = File('${tempDir.path}/atril_edit_${DateTime.now().millisecondsSinceEpoch}.jpg');
+    await tempFile.writeAsBytes(jpegBytes, flush: true);
     return tempFile.path;
   }
 
@@ -594,7 +676,25 @@ class _ImageEditScreenState extends State<ImageEditScreen> {
 
 // --- Top-level Isolate Processing ---
 
-Future<String> _processPerspectiveIsolate(_PerspectiveProcessParams p) async {
+/// Message wrapper to pass both params and a SendPort to the isolate.
+class _IsolateMessage {
+  final _PerspectiveProcessParams params;
+  final SendPort sendPort;
+  const _IsolateMessage(this.params, this.sendPort);
+}
+
+/// Isolate entry point that sends progress updates through the SendPort.
+void _processPerspectiveWithProgress(_IsolateMessage msg) {
+  try {
+    final result = _runPerspectiveWarp(msg.params, msg.sendPort);
+    msg.sendPort.send(result); // Send final path as String
+  } catch (e) {
+    msg.sendPort.send(['error', e.toString()]);
+  }
+}
+
+/// Core perspective warp logic. Reports progress through [sendPort] if non-null.
+String _runPerspectiveWarp(_PerspectiveProcessParams p, SendPort? sendPort) {
   final file = File(p.sourcePath);
   final bytes = file.readAsBytesSync();
   var source = img.decodeImage(bytes);
@@ -605,42 +705,56 @@ Future<String> _processPerspectiveIsolate(_PerspectiveProcessParams p) async {
   final int realW = source.width;
   final int realH = source.height;
 
+  sendPort?.send(0.05); // 5% — image decoded
+
   // Warp Quad points back to real pixel coordinates
   final tl = math.Point<double>(p.cropTL.dx * realW, p.cropTL.dy * realH);
   final tr = math.Point<double>(p.cropTR.dx * realW, p.cropTR.dy * realH);
   final bl = math.Point<double>(p.cropBL.dx * realW, p.cropBL.dy * realH);
   final br = math.Point<double>(p.cropBR.dx * realW, p.cropBR.dy * realH);
 
-  // Output: A4 (1240 x 1754 @ 150dpi)
-  const int outW = 1240;
-  const int outH = 1754;
+  // Adaptive output resolution based on source image size.
+  final double sourceMegapixels = realW * realH / 1e6;
+  final int outW, outH;
+  if (sourceMegapixels >= 8) {
+    outW = 2480; outH = 3508; // 300 DPI A4
+  } else if (sourceMegapixels >= 4) {
+    outW = 2067; outH = 2923; // 250 DPI A4
+  } else {
+    outW = 1654; outH = 2339; // 200 DPI A4
+  }
 
   // 1. Calculate Homography Matrix H (3x3)
-  // Maps target (u,v) in A4 to source (x,y) in photo
   final h = _calculateHomography(
-    const math.Point(0.0, 0.0), const math.Point(1240.0, 0.0),
-    const math.Point(1240.0, 1754.0), const math.Point(0.0, 1754.0),
+    const math.Point(0.0, 0.0), math.Point(outW.toDouble(), 0.0),
+    math.Point(outW.toDouble(), outH.toDouble()), math.Point(0.0, outH.toDouble()),
     tl, tr, br, bl,
   );
 
-  // 2. Perform Perspective Warp (Manual loop for true homography)
+  // 2. Perform Perspective Warp with progress reporting
+  //    The warp is ~80% of total processing time.
   final result = img.Image(width: outW, height: outH);
+  final int progressInterval = (outH / 20).ceil(); // Report ~20 times
   for (int v = 0; v < outH; v++) {
     for (int u = 0; u < outW; u++) {
-      // Apply homography transformation u,v -> x,y
       final double denominator = h[6] * u + h[7] * v + 1.0;
       final double x = (h[0] * u + h[1] * v + h[2]) / denominator;
       final double y = (h[3] * u + h[4] * v + h[5]) / denominator;
 
-      // Bilinear sampling from source
       if (x >= 0 && x < realW - 1 && y >= 0 && y < realH - 1) {
-        final pixel = source.getPixelInterpolate(x, y, interpolation: img.Interpolation.linear);
+        final pixel = source.getPixelInterpolate(x, y, interpolation: img.Interpolation.cubic);
         result.setPixel(u, v, pixel);
       }
     }
+    // Report progress: 5% (decode) + 80% (warp) = 5..85%
+    if (v % progressInterval == 0) {
+      sendPort?.send(0.05 + 0.80 * (v / outH));
+    }
   }
 
-  // 3. Apply Filters (Optimized package:image versions)
+  sendPort?.send(0.85); // Warp complete
+
+  // 3. Apply Filters
   if (p.brightness != 0 || p.contrast != 0) {
     img.adjustColor(
       result,
@@ -654,16 +768,20 @@ Future<String> _processPerspectiveIsolate(_PerspectiveProcessParams p) async {
     img.luminanceThreshold(result, threshold: p.threshold / 255.0);
   }
 
+  sendPort?.send(0.90); // Filters done
+
   // Rotation (if needed)
   var finalResult = result;
   if (p.rotation != 0) {
     finalResult = img.copyRotate(result, angle: (p.rotation % 4) * 90);
   }
 
-  // Save as JPG (FASTER than PNG for large photos)
-  final outBytes = img.encodeJpg(finalResult, quality: 90);
+  // Save as JPEG quality 95
+  final outBytes = img.encodeJpg(finalResult, quality: 95);
   final outFile = File(p.tempPath);
   outFile.writeAsBytesSync(outBytes);
+
+  sendPort?.send(0.99); // Encoding done
 
   return p.tempPath;
 }

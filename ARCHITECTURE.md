@@ -86,13 +86,17 @@ La base de datos (`AppDatabase`) define la estructura core:
     * Carpetas anidables infinitas y CRUD completo.
     * Importación de archivos sueltos y carpetas recursivas.
 * **Photo Scanner (Cámara → PDF):**
-    * Lista de páginas reordenable con persistencia.
+    * Captura a resolución nativa completa (sin límites de `maxWidth`/`imageQuality`).
+    * Lista de páginas reordenable con progreso en tiempo real por tile.
     * **Editor con Corrección Proyectiva (Homografía 3x3)**:
         * 4 handles independientes para rectificación de perspectiva real.
-        * Procesamiento en segundo plano (**Isolates / `compute`**) para evitar bloqueos de UI.
+        * **Resolución adaptativa**: 300 DPI (12MP+), 250 DPI (5-8MP), 200 DPI mínimo.
+        * **Interpolación bicúbica** para líneas de pentagrama nítidas.
+        * Procesamiento diferido en `Isolate.spawn` con `SendPort` para progreso en tiempo real.
         * **Bake Orientation**: Soporte nativo para fotos con rotación EXIF.
         * Filtros optimizados de B/N, Umbral, Brillo y Contraste.
-    * Generación de PDF multi-página.
+    * **PdfGenerator** con compresión inteligente: pass-through de JPEGs sin re-codificar, solo re-procesa si excede 300 DPI.
+    * Creación de PDF en background con progreso global (`AppData.backgroundTaskProgress`).
 * **Lector PDF (**`pdfrx`**):**
     * Navegación entre documentos y **Scrubber Vertical** (throttled).
     * Soporte para anotaciones con Lápiz y Resaltador por página/setlist.

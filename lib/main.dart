@@ -1,9 +1,18 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'firebase_options.dart';
+import 'screens/auth_gate.dart';
 import 'screens/home_shell.dart';
 import 'data/app_data.dart';
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Initialize Firebase (same pattern as Metrónomo & Afinador)
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
+
   runApp(const AtrilApp());
 }
 
@@ -15,18 +24,19 @@ class AtrilApp extends StatelessWidget {
     return FutureBuilder<void>(
       future: AppData.init(),
       builder: (context, snapshot) {
-        // Minimal bootstrap UI. If init fails, surface it clearly.
         if (snapshot.hasError) {
           return MaterialApp(
             debugShowCheckedModeBanner: false,
-            theme: ThemeData(useMaterial3: true),
+            theme: ThemeData.dark(useMaterial3: true),
             home: Scaffold(
+              backgroundColor: const Color(0xFF121218),
               body: Center(
                 child: Padding(
                   padding: const EdgeInsets.all(24),
                   child: Text(
                     'Error inicializando la app:\n\n${snapshot.error}',
                     textAlign: TextAlign.center,
+                    style: const TextStyle(color: Colors.white70),
                   ),
                 ),
               ),
@@ -37,8 +47,9 @@ class AtrilApp extends StatelessWidget {
         if (snapshot.connectionState != ConnectionState.done) {
           return MaterialApp(
             debugShowCheckedModeBanner: false,
-            theme: ThemeData(useMaterial3: true),
+            theme: ThemeData.dark(useMaterial3: true),
             home: const Scaffold(
+              backgroundColor: Color(0xFF121218),
               body: Center(child: CircularProgressIndicator()),
             ),
           );
@@ -71,7 +82,7 @@ class AtrilApp extends StatelessWidget {
                   child: child!,
                 );
               },
-              home: const HomeShell(),
+              home: const AuthGate(),
             );
           },
         );
