@@ -13,7 +13,7 @@
   <img src="https://img.shields.io/badge/Platform-Android%20|%20Windows%20|%20Web-green?logo=android" alt="Platform"/>
   <img src="https://img.shields.io/badge/Firebase-Auth%20%2B%20Firestore-FFCA28?logo=firebase" alt="Firebase"/>
   <img src="https://img.shields.io/badge/License-Private-lightgrey" alt="License"/>
-  <img src="https://img.shields.io/badge/Version-1.15.0-orange" alt="Version"/>
+  <img src="https://img.shields.io/badge/Version-1.16.0-orange" alt="Version"/>
 </p>
 
 ---
@@ -78,6 +78,8 @@
 - Crea listas de reproducción ordenadas con tus partituras.
 - **Modo Vivo**: navegación fluida entre partituras con un solo tap, ideal para conciertos.
 - Reordenamiento con drag & drop.
+- **Compartir como ZIP**: archivos ordenados con nombre legible (`01 - Tema.pdf`).
+- **Compartir como `.setlist`**: formato propietario reimportable por otros usuarios de Atril.
 
 ### 🗑️ Papelera de Reciclaje
 - Los elementos eliminados se ocultan de la interfaz principal (Soft Delete).
@@ -91,6 +93,14 @@
 - **Restauración destructiva**: reemplaza toda la biblioteca con un backup anterior.
 - **Exportación para PC**: genera un ZIP legible con la estructura de carpetas y nombres originales.
 - Todo procesado con **Isolates** y barras de progreso en tiempo real.
+
+### 📤 Compartir / Importar (100% Offline)
+- **Compartir PDF individual** desde el menú contextual (⋮) con nombre de display.
+- **Compartir Setlist** como ZIP universal o `.setlist` propietario.
+- **Importar `.setlist`**: al tocar un archivo recibido (WhatsApp, email, etc.), Atril lo abre automáticamente, crea una carpeta en la biblioteca con todos los PDFs y genera el setlist.
+- **Detección inteligente**: identifica el tipo de archivo por contenido (header ZIP + `data.json`), no por extensión.
+- Registro nativo de tipo de archivo en **Android** e **iOS** para asociación automática con la app.
+- Soporte para **cold start** (app cerrada) y **hot resume** (app en background) via `MethodChannel`.
 
 ### ⚙️ Configuración
 - **Modo Oscuro / Claro** con Material 3.
@@ -147,6 +157,8 @@ lib/
 │   ├── app_database.dart      # Schema Drift (SQLite) con migraciones
 │   ├── library_storage.dart   # Abstracción de FileSystem
 │   ├── backup_manager.dart    # Lógica de backup/restore/export con Isolates
+│   ├── export_manager.dart    # Compartir/Importar PDFs y Setlists con Isolates
+│   ├── file_receiver_channel.dart # MethodChannel para archivos entrantes
 │   └── repositories/
 │       ├── library_repository.dart      # CRUD de docs y carpetas, soft delete
 │       ├── setlist_repository.dart      # Gestión de listas de reproducción

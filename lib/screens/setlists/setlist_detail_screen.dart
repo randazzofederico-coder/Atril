@@ -201,11 +201,37 @@ class _SetlistDetailScreenState extends State<SetlistDetailScreen> {
               PopupMenuButton<String>(
                 onSelected: (v) {
                   if (v == 'delete_setlist') _confirmDeleteSetlist(setlist);
+                  if (v == 'share_zip') {
+                    AppData.shareSetlist(setlist, format: SetlistExportFormat.zip).catchError((e) {
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('Error: $e')),
+                        );
+                      }
+                    });
+                  }
+                  if (v == 'share_setlist') {
+                    AppData.shareSetlist(setlist, format: SetlistExportFormat.setlist).catchError((e) {
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('Error: $e')),
+                        );
+                      }
+                    });
+                  }
                 },
                 itemBuilder: (context) => [
                   const PopupMenuItem(
+                    value: 'share_zip',
+                    child: Text('Compartir como ZIP'),
+                  ),
+                  const PopupMenuItem(
+                    value: 'share_setlist',
+                    child: Text('Compartir como .setlist'),
+                  ),
+                  const PopupMenuItem(
                     value: 'delete_setlist',
-                    child: Text('Eliminar setlist'),
+                    child: Text('Eliminar setlist', style: TextStyle(color: Colors.red)),
                   ),
                 ],
               ),

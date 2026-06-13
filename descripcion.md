@@ -1,23 +1,21 @@
-Descripción Corta
-
-Tu biblioteca de partituras digital para el escenario. Organiza, anota y toca.
+Descripción Corta (Ideal para pantallas de celular)
+Tu biblioteca digital de partituras PDF. Escaneá, organizá y anotá tu música para tocar en vivo con total fiabilidad.
 
 Descripción Detallada
+Atril es una herramienta esencial pensada para músicos que necesitan gestionar, leer y anotar partituras en PDF con absoluta fiabilidad durante el escenario o el estudio. Diseñada para mantener toda tu biblioteca funcionando de manera fluida y local en tu dispositivo, garantiza que tu música esté siempre lista cuando la necesites.
 
-Atril es la herramienta definitiva diseñada por y para músicos que necesitan llevar toda su biblioteca musical en su dispositivo. Pensada para garantizar fiabilidad total en el escenario, te permite gestionar, leer y anotar tus partituras PDF sin depender de una conexión a internet durante el show.
+Funciones Principales:
 
-Funciones principales:
+Visor Optimizado para el Escenario: Motor de lectura ultra rápido con "Modo Vivo" para navegación de un solo toque. Incluye bloqueo de pantalla (siempre encendida) e inversión de colores para lectura en ambientes oscuros.
 
-Organización sin límites: Ordena tus PDFs en carpetas anidadas y encuentra rápidamente lo que buscas con la búsqueda global. Importa archivos sueltos, carpetas enteras o usa la cámara.
+Escáner Inteligente Integrado: Digitalizá partituras físicas con tu cámara. Cuenta con corrección de perspectiva profesional, interpolación de alta calidad para mantener la nitidez de los pentagramas y procesamiento en segundo plano.
 
-Modo Vivo y Setlists: Arma tus listas de temas para cada concierto. El "Modo Vivo" te permite navegar fluidamente entre las partituras con un solo toque, manteniendo la pantalla siempre encendida (wakelock) para evitar interrupciones.
+Organización sin Límites: Estructurá tu biblioteca con carpetas anidables infinitas, búsqueda global y un sistema de Setlists para ordenar tu repertorio exacto antes de cada show.
 
-Anotaciones inteligentes: Escribe sobre tus partituras de forma no destructiva. Usa lápiz, resaltador, borrador, añade texto o inserta sellos musicales rápidos (coda, segno, etc.). Todo se guarda automáticamente.
+Anotaciones No Destructivas: Tomá notas rápidamente con lápiz, resaltador, texto y sellos musicales (coda, segno, etc.) sin alterar tu archivo PDF original.
 
-Escáner de partituras integrado: Fotografía hojas sueltas y conviértelas en PDFs multipágina. Incluye corrección de perspectiva profesional, ajustes de contraste y filtros blanco/negro para que la partitura quede perfecta.
+Edición PDF Nativa: Reordená, eliminá o agregá páginas nuevas a tus archivos directamente desde la aplicación de forma intuitiva.
 
-Lectura optimizada: Motor de renderizado ultra rápido para un scroll sin cortes. ¿Escenario oscuro? Activa la inversión de colores para transformar partituras blancas en un modo nocturno amigable para la vista.
+Seguridad y Backups: Sistema integral para realizar copias de seguridad de toda tu base de datos y archivos, además de contar con una papelera de reciclaje que protege tus documentos de borrados accidentales.
 
-Privacidad y Backups: Toda tu música y anotaciones viven en tu dispositivo. Crea copias de seguridad completas de toda tu biblioteca en un solo archivo comprimido y expórtalas fácilmente.
-
-Lleva tu música a todos lados, olvídate del papel y concéntrate solo en tocar.
+Gestión de Cuentas: Acceso seguro mediante Google o email, con gestión de perfiles y soporte para períodos de prueba y suscripciones.

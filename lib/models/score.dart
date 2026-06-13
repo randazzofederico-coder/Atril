@@ -20,4 +20,11 @@ class Score {
     this.filePath,
     this.folderId = 'root',
   });
+
+  /// Serializa metadata para el formato de exportación .setlist.
+  Map<String, dynamic> toJsonMap() => {
+    'docId': docId,
+    'title': title,
+    'author': author,
+  };
 }

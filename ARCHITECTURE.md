@@ -1,8 +1,8 @@
 # ARCHITECTURE.md — Atril Digital (Flutter)
 
-**Estado del Proyecto:** Consolidación — **v1.15.0 (PDF Page Editor)**
-**Fecha de Análisis:** Abril 2026
-**Objetivo:** Editor de estructura de PDF: reordenar, eliminar y agregar páginas.
+**Estado del Proyecto:** Consolidación — **v1.16.0 (Compartir/Importar Setlists)**
+**Fecha de Análisis:** Junio 2026
+**Objetivo:** Compartir PDFs y setlists offline, importar archivos `.setlist` recibidos.
 
 ---
 
@@ -55,6 +55,8 @@ Contiene la lógica de negocio pura. Ubicación: `lib/data/repositories/`.
 * **`AnnotationRepository`:** Gestión de trazos de tinta y capas de dibujo.
 * **`SettingsRepository`:** Preferencias de usuario (Tema, Escala UI).
 * **`BackupManager`:** Lógica de compresión/descompresión (ZIP), exportación e importación de backups completos (`.atril`).
+* **`ExportManager`:** Compartir PDFs individuales y setlists (ZIP o `.setlist` propietario) vía `share_plus`. Importación de archivos `.setlist` recibidos con descompresión en Isolate.
+* **`FileReceiverChannel`:** Canal de plataforma (`MethodChannel`) para recibir archivos abiertos desde otras apps. Maneja cold start y hot resume.
 * **`PdfGenerator`:** Generación de PDFs multi-página desde imágenes usando Syncfusion.
 * **`PdfManipulator`:** Manipulación de estructura de PDFs existentes: renderizado de thumbnails (pdfrx), reordenamiento y eliminación de páginas (Syncfusion templates), inserción de nuevas páginas de imagen.
 
@@ -118,6 +120,18 @@ La base de datos (`AppDatabase`) define la estructura core:
         * Restauración rápida con preservación de metadatos y anotaciones.
         * **Auto-cleanup**: Eliminación física automática tras 30 días.
         * Integración inteligente con backups e importaciones.
+* **Compartir / Exportar (Offline):**
+    * **Compartir PDF individual** desde el menú contextual (⋮) con nombre de display.
+    * **Compartir Setlist como ZIP**: Archivos ordenados con zero-padding (`01 - Tema.pdf`).
+    * **Compartir Setlist como `.setlist`**: Formato propietario con `data.json` + PDFs.
+    * Compresión en **Isolate** con barra de progreso en tiempo real.
+    * Accesible desde menú ⋮ de PDFs, lista de setlists y detalle de setlist.
+* **Importar Setlists (`.setlist`):**
+    * Registro de tipo de archivo en **Android** (`intent-filter`) e **iOS** (`CFBundleDocumentTypes` + UTI).
+    * Recepción vía `MethodChannel` con soporte para **cold start** y **hot resume**.
+    * **Detección por contenido** (no por extensión): verifica header ZIP + presencia de `data.json`.
+    * Descompresión en Isolate → importación de PDFs en carpeta dedicada → creación de setlist.
+    * Código nativo: `MainActivity.kt` (Android) + `AppDelegate.swift` (iOS).
 
 ### 🔮 Próximos Pasos
 * **Nuevas Herramientas de Anotación:** Texto enriquecido, Formas geométricas, Sellos musicales.
@@ -133,7 +147,10 @@ lib/
 │   ├── repositories/       # Lógica (Library, Setlist, Import, PdfGenerator, etc.)
 │   ├── app_data.dart       # Fachada Global (Orquestador)
 │   ├── app_database.dart   # Definición de Schema Drift
-│   └── library_storage.dart# Abstracción de FileSystem
+│   ├── library_storage.dart# Abstracción de FileSystem
+│   ├── backup_manager.dart # Backup/Restore con Isolates
+│   ├── export_manager.dart # Compartir/Importar PDFs y Setlists
+│   └── file_receiver_channel.dart # MethodChannel para archivos entrantes
 ├── models/                 # POJOs y Entidades (Score, Setlist, Stroke)
 ├── screens/                # Library, Reader, Setlists, Settings
 └── widgets/                # UI Components Reutilizables

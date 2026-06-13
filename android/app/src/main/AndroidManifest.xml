@@ -36,6 +36,29 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
+
+            <!-- Abrir archivos .setlist y .atril desde otras apps (ACTION_VIEW) -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="content"/>
+                <data android:scheme="file"/>
+                <data android:mimeType="*/*"/>
+                <data android:pathPattern=".*\\.setlist"/>
+                <data android:pathPattern=".*\\.atril"/>
+                <data android:pathPattern=".*\\..*\\.setlist"/>
+                <data android:pathPattern=".*\\..*\\..*\\.setlist"/>
+                <data android:pathPattern=".*\\..*\\.atril"/>
+                <data android:pathPattern=".*\\..*\\..*\\.atril"/>
+            </intent-filter>
+
+            <!-- Recibir archivos .setlist y .atril compartidos (ACTION_SEND) -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="*/*"/>
+            </intent-filter>
         </activity>
         
         <meta-data

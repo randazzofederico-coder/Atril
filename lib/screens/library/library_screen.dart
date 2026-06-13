@@ -321,6 +321,18 @@ class _LibraryScreenState extends State<LibraryScreen> {
                    if (action == 'delete') LibraryActions.deleteScore(context, docId);
                    if (action == 'rename') LibraryActions.editScoreMetadata(context, docId);
                    if (action == 'edit_pages') LibraryActions.editPdfPages(context, docId);
+                   if (action == 'share') {
+                     final score = AppData.getScoreById(docId);
+                     if (score != null) {
+                       AppData.sharePdf(score).catchError((e) {
+                         if (context.mounted) {
+                           ScaffoldMessenger.of(context).showSnackBar(
+                             SnackBar(content: Text('Error al compartir: $e')),
+                           );
+                         }
+                       });
+                     }
+                   }
                 },
               ),
             ),

@@ -193,6 +193,7 @@ class LibraryBrowserSelector extends StatelessWidget {
         itemBuilder: (context) => const [
           PopupMenuItem(value: 'rename', child: Text('Editar datos')),
           PopupMenuItem(value: 'edit_pages', child: Text('Editar Páginas')),
+          PopupMenuItem(value: 'share', child: Text('Compartir')),
           PopupMenuItem(value: 'delete', child: Text('Eliminar', style: TextStyle(color: Colors.red))),
         ],
       );

@@ -82,7 +82,7 @@ class AtrilApp extends StatelessWidget {
                   child: child!,
                 );
               },
-              home: const AuthGate(),
+              home: const HomeShell(),
             );
           },
         );

@@ -71,11 +71,37 @@ class SetlistsScreen extends StatelessWidget {
                     if (v == 'delete') {
                       _confirmDeleteSetlist(context, setlist);
                     }
+                    if (v == 'share_zip') {
+                      AppData.shareSetlist(setlist, format: SetlistExportFormat.zip).catchError((e) {
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('Error: $e')),
+                          );
+                        }
+                      });
+                    }
+                    if (v == 'share_setlist') {
+                      AppData.shareSetlist(setlist, format: SetlistExportFormat.setlist).catchError((e) {
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('Error: $e')),
+                          );
+                        }
+                      });
+                    }
                   },
                   itemBuilder: (context) => const [
                     PopupMenuItem(
+                      value: 'share_zip',
+                      child: Text('Compartir como ZIP'),
+                    ),
+                    PopupMenuItem(
+                      value: 'share_setlist',
+                      child: Text('Compartir como .setlist'),
+                    ),
+                    PopupMenuItem(
                       value: 'delete',
-                      child: Text('Eliminar'),
+                      child: Text('Eliminar', style: TextStyle(color: Colors.red)),
                     ),
                   ],
                 ),

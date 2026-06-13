@@ -24,6 +24,9 @@ export 'repositories/annotation_repository.dart';
 import 'repositories/settings_repository.dart';
 export 'repositories/settings_repository.dart';
 
+import 'export_manager.dart';
+export 'export_manager.dart';
+
 class AppData {
   static AppDatabase db = AppDatabase();
   static final LibraryStorage storage = LibraryStorage.instance;
@@ -430,6 +433,16 @@ class AppData {
     await SetlistRepository.removeDocFromSetlist(setlistId, docId); 
     _notifySetlists();
   }
+
+  // --- EXPORT / SHARE ---
+  static Future<void> sharePdf(Score score) =>
+      ExportManager.instance.sharePdf(score);
+
+  static Future<void> shareSetlist(Setlist setlist, {required SetlistExportFormat format}) =>
+      ExportManager.instance.shareSetlist(setlist, format: format);
+
+  static Future<String?> importSetlistFile(String filePath) =>
+      ExportManager.instance.importSetlistFile(filePath);
 
   // --- ANNOTATION REPOSITORY ---
   static Future<List<AnnotationStroke>> getAnnotationStrokesForPage({required String docId, required int pageIndex, String? setlistId}) =>
