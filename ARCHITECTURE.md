@@ -1,6 +1,6 @@
 # ARCHITECTURE.md — Atril Digital (Flutter)
 
-**Estado del Proyecto:** Consolidación — **v1.17.0 (Exportación con anotaciones + Editor de páginas que preserva anotaciones)**
+**Estado del Proyecto:** Consolidación — **v1.17.1 (Fix revalidación de acceso offline)**
 **Fecha de Análisis:** Noviembre 2026
 **Objetivo:** Compartir/exportar con o sin anotaciones y que la edición de páginas nunca pierda anotaciones.
 
@@ -140,6 +140,12 @@ La base de datos (`AppDatabase`) define la estructura core:
     * Descompresión en Isolate → importación de PDFs en carpeta dedicada → creación de setlist.
     * Código nativo: `MainActivity.kt` (Android) + `AppDelegate.swift` (iOS).
 * **Importar Backup (merge):** ahora migra también las anotaciones (capa global) de los documentos importados.
+* **Autenticación y Acceso Offline (`AuthGate` / `_PermissionChecker`):**
+    * Verificación online contra Firestore (`usuarios/{uid}`, `Source.server`, timeout 15 s). El resultado se cachea en `SettingsRepository` (`PermissionCache`).
+    * Si la verificación falla, se usa el caché (válido 30 días). Con ≤5 días restantes se muestra `_OfflineWarningWrapper`.
+    * **Revalidación automática:** mientras está en modo offline reintenta en silencio cada 2 minutos (`Timer.periodic`) y al volver a primer plano (`WidgetsBindingObserver`), sin pantalla de carga. Si falla, conserva el estado actual.
+    * **Reintento manual:** botón "Reintentar" en el aviso; si falla muestra el error real (`FirebaseException.code`) en un SnackBar.
+    * **Parseo tolerante** de `trial_atril_inicio` (Timestamp/DateTime/String/int), `suscripciones_apps` y `rol`: un tipo inesperado en Firestore ya no se confunde con "sin conexión".
 
 ### 🔮 Próximos Pasos
 * **Nuevas Herramientas de Anotación:** Texto enriquecido, Formas geométricas, Sellos musicales.

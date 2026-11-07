@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -36,7 +38,8 @@ class _PermissionChecker extends StatefulWidget {
   State<_PermissionChecker> createState() => _PermissionCheckerState();
 }
 
-class _PermissionCheckerState extends State<_PermissionChecker> {
+class _PermissionCheckerState extends State<_PermissionChecker>
+    with WidgetsBindingObserver {
   bool _isLoading = true;
   bool _hasProfile = false;
   bool _hasAccess = false;
@@ -60,19 +63,82 @@ class _PermissionCheckerState extends State<_PermissionChecker> {
   static const Color _textPrimary = Color(0xFFE8E6F0);
   static const Color _textSecondary = Color(0xFF8A87A0);
 
+  // Last error from the online check (shown in the offline banner for diagnosis)
+  String? _lastError;
+  bool _isRevalidating = false;
+  Timer? _revalidateTimer;
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _checkPermissions();
   }
 
-  Future<void> _checkPermissions() async {
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _revalidateTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // When the app comes back to the foreground while in offline mode,
+    // try to revalidate silently.
+    if (state == AppLifecycleState.resumed && _isOffline) {
+      _revalidateSilently();
+    }
+  }
+
+  /// Keeps retrying the online check periodically while in offline mode.
+  void _updateRevalidateTimer() {
+    if (_isOffline) {
+      _revalidateTimer ??= Timer.periodic(
+        const Duration(minutes: 2),
+        (_) => _revalidateSilently(),
+      );
+    } else {
+      _revalidateTimer?.cancel();
+      _revalidateTimer = null;
+    }
+  }
+
+  /// Retries the online check without showing the loading screen.
+  /// If it fails, the current (offline) state is kept.
+  /// Returns null on success, or the error message on failure.
+  Future<String?> _revalidateSilently() async {
+    if (_isRevalidating) return null;
+    _isRevalidating = true;
+    if (mounted) setState(() {});
+    try {
+      await _checkPermissions(silent: true);
+    } finally {
+      _isRevalidating = false;
+      if (mounted) setState(() {});
+    }
+    return _isOffline ? (_lastError ?? 'Error desconocido') : null;
+  }
+
+  /// Parses the trial start field tolerating different stored types.
+  static DateTime? _parseDate(dynamic value) {
+    if (value is Timestamp) return value.toDate();
+    if (value is DateTime) return value;
+    if (value is String) return DateTime.tryParse(value);
+    if (value is int) return DateTime.fromMillisecondsSinceEpoch(value);
+    return null;
+  }
+
+  Future<void> _checkPermissions({bool silent = false}) async {
     try {
       // --- ATTEMPT ONLINE CHECK ---
       final docSnap = await FirebaseFirestore.instance
           .collection('usuarios')
           .doc(widget.user.uid)
-          .get(const GetOptions(source: Source.server));
+          .get(const GetOptions(source: Source.server))
+          .timeout(const Duration(seconds: 15));
+
+      if (!mounted) return;
 
       if (!docSnap.exists) {
         // No profile → needs onboarding
@@ -86,18 +152,23 @@ class _PermissionCheckerState extends State<_PermissionChecker> {
           trialExpired: false,
           trialUsed: false,
         );
+        if (!mounted) return;
         setState(() {
           _isLoading = false;
           _hasProfile = false;
           _isOffline = false;
+          _lastError = null;
         });
+        _updateRevalidateTimer();
         return;
       }
 
       final data = docSnap.data()!;
-      final suscripciones = data['suscripciones_apps'] as Map<String, dynamic>?;
-      final hasAtril = suscripciones?['atril'] == true;
-      final rol = data['rol'] as String? ?? 'pendiente';
+      final suscripcionesRaw = data['suscripciones_apps'];
+      final hasAtril =
+          suscripcionesRaw is Map && suscripcionesRaw['atril'] == true;
+      final rolRaw = data['rol'];
+      final rol = rolRaw is String ? rolRaw : 'pendiente';
 
       // Check trial period
       bool trialActive = false;
@@ -105,10 +176,9 @@ class _PermissionCheckerState extends State<_PermissionChecker> {
       bool trialExpired = false;
       bool trialUsed = false;
 
-      final trialInicio = data['trial_atril_inicio'];
-      if (trialInicio != null) {
+      final DateTime? trialStart = _parseDate(data['trial_atril_inicio']);
+      if (trialStart != null) {
         trialUsed = true;
-        final DateTime trialStart = (trialInicio as Timestamp).toDate();
         final DateTime trialEnd = trialStart.add(const Duration(days: 30));
         final DateTime now = DateTime.now();
 
@@ -133,6 +203,7 @@ class _PermissionCheckerState extends State<_PermissionChecker> {
         trialUsed: trialUsed,
       );
 
+      if (!mounted) return;
       setState(() {
         _isLoading = false;
         _hasProfile = true;
@@ -144,11 +215,26 @@ class _PermissionCheckerState extends State<_PermissionChecker> {
         _trialUsed = trialUsed;
         _isOffline = false;
         _daysUntilExpiry = 30; // Just verified
+        _lastError = null;
       });
-    } catch (e) {
+      _updateRevalidateTimer();
+    } catch (e, st) {
       // --- OFFLINE FALLBACK ---
-      debugPrint("Firestore check failed (offline?): $e");
+      debugPrint("Firestore check failed (offline?): $e\n$st");
+      if (!mounted) return;
+      _lastError = e is FirebaseException
+          ? '${e.code}: ${e.message ?? ''}'
+          : e.toString();
+      if (silent) {
+        // Keep the current state; just refresh the remaining days.
+        final cache = SettingsRepository.instance.loadPermissionCache();
+        if (cache != null && !cache.isExpired) {
+          setState(() => _daysUntilExpiry = cache.daysUntilExpiry);
+          return;
+        }
+      }
       _handleOfflineFallback();
+      _updateRevalidateTimer();
     }
   }
 
@@ -283,6 +369,8 @@ class _PermissionCheckerState extends State<_PermissionChecker> {
     if (_isOffline && _daysUntilExpiry <= 5) {
       return _OfflineWarningWrapper(
         daysLeft: _daysUntilExpiry,
+        isRetrying: _isRevalidating,
+        onRetry: _revalidateSilently,
         child: const HomeShell(),
       );
     }
@@ -301,9 +389,30 @@ class _PermissionCheckerState extends State<_PermissionChecker> {
 // ---------------------------------------------------------------------------
 class _OfflineWarningWrapper extends StatelessWidget {
   final int daysLeft;
+  final bool isRetrying;
+  final Future<String?> Function() onRetry;
   final Widget child;
 
-  const _OfflineWarningWrapper({required this.daysLeft, required this.child});
+  const _OfflineWarningWrapper({
+    required this.daysLeft,
+    required this.isRetrying,
+    required this.onRetry,
+    required this.child,
+  });
+
+  Future<void> _handleRetry(BuildContext context) async {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    final error = await onRetry();
+    if (error != null && messenger != null) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text('No se pudo verificar el acceso:\n$error'),
+          backgroundColor: Colors.redAccent,
+          duration: const Duration(seconds: 8),
+        ),
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -340,6 +449,35 @@ class _OfflineWarningWrapper extends StatelessWidget {
                       ),
                     ),
                   ),
+                  const SizedBox(width: 8),
+                  isRetrying
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : GestureDetector(
+                          onTap: () => _handleRetry(context),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.15),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: const Text(
+                              "Reintentar",
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ),
                 ],
               ),
             ),

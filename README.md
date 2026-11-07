@@ -32,6 +32,7 @@
 - **Sistema de permisos** basado en roles (`admin`, `pendiente`, suscripción activa).
 - **Período de prueba gratuito** de 30 días, activable desde la app.
 - **Pantalla de acceso pendiente** con opciones de prueba, suscripción y reintento.
+- **Acceso offline por 30 días**: el último permiso verificado se cachea localmente. Cuando faltan ≤5 días aparece un aviso con botón **Reintentar**; la app además reintenta sola cada 2 minutos y al volver al primer plano, mostrando el error real si la verificación falla.
 - Recuperación de contraseña por email.
 
 ### 📚 Biblioteca de Partituras
