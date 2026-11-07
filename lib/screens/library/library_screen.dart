@@ -7,6 +7,7 @@ import '../../widgets/import_status_bar.dart';
 import '../reader/pdf_viewer_screen.dart';
 import '../../widgets/scoped_search_delegate.dart';
 import '../settings/settings_screen.dart';
+import 'export_actions.dart';
 import 'library_actions.dart'; // <--- Importamos la nueva lógica
 
 class LibraryScreen extends StatefulWidget {
@@ -324,13 +325,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                    if (action == 'share') {
                      final score = AppData.getScoreById(docId);
                      if (score != null) {
-                       AppData.sharePdf(score).catchError((e) {
-                         if (context.mounted) {
-                           ScaffoldMessenger.of(context).showSnackBar(
-                             SnackBar(content: Text('Error al compartir: $e')),
-                           );
-                         }
-                       });
+                       ExportActions.shareScore(context, score);
                      }
                    }
                 },

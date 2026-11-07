@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../data/app_data.dart';
+import '../../data/repositories/page_edit_repository.dart';
 import '../../data/repositories/pdf_manipulator.dart';
 import '../../models/score.dart';
 import 'image_edit_screen.dart';
@@ -79,10 +80,61 @@ class _PdfPageEditorScreenState extends State<PdfPageEditorScreen> {
   bool _isLoading = true;
   bool _hasChanges = false;
 
+  /// Historial para deshacer dentro del editor (snapshots del orden de páginas).
+  final List<List<_PageEntry>> _undoStack = [];
+
+  /// Páginas originales (0-based) que tienen anotaciones.
+  Set<int> _annotatedOriginalPages = {};
+
+  /// Hay una edición guardada anteriormente que se puede deshacer.
+  bool _canUndoSaved = false;
+
   @override
   void initState() {
     super.initState();
     _loadPdfPages();
+    _loadAnnotationInfo();
+  }
+
+  /// Carga qué páginas tienen anotaciones y si hay una edición previa
+  /// que se pueda deshacer.
+  Future<void> _loadAnnotationInfo() async {
+    final docId = widget.score.docId;
+    final rows = await AppData.db.getAllAnnotationStrokesForDocAllLayers(docId);
+    final canUndo = await PageEditRepository.hasUndo(docId);
+    if (!mounted) return;
+    setState(() {
+      _annotatedOriginalPages = rows.map((r) => r.pageIndex - 1).toSet();
+      _canUndoSaved = canUndo;
+    });
+  }
+
+  // --- Deshacer (en el editor) ---
+
+  void _pushUndo() {
+    _undoStack.add(List<_PageEntry>.of(_pages));
+  }
+
+  void _undo() {
+    if (_undoStack.isEmpty) return;
+    setState(() {
+      final previous = _undoStack.removeLast();
+      _pages
+        ..clear()
+        ..addAll(previous);
+      _hasChanges = _undoStack.isNotEmpty;
+    });
+  }
+
+  /// Reemplaza una entrada (por identidad) en la lista actual y en el
+  /// historial, para que deshacer nunca restaure una versión obsoleta.
+  void _replaceEntry(_PageEntry oldEntry, _PageEntry newEntry) {
+    final i = _pages.indexOf(oldEntry);
+    if (i != -1) _pages[i] = newEntry;
+    for (final snapshot in _undoStack) {
+      final j = snapshot.indexOf(oldEntry);
+      if (j != -1) snapshot[j] = newEntry;
+    }
   }
 
   /// Loads the existing PDF pages and starts rendering thumbnails.
@@ -116,8 +168,10 @@ class _PdfPageEditorScreenState extends State<PdfPageEditorScreen> {
   // --- Actions ---
 
   void _onReorder(int oldIndex, int newIndex) {
+    if (newIndex > oldIndex) newIndex--;
+    if (newIndex == oldIndex) return;
     setState(() {
-      if (newIndex > oldIndex) newIndex--;
+      _pushUndo();
       final item = _pages.removeAt(oldIndex);
       _pages.insert(newIndex, item);
       _hasChanges = true;
@@ -134,10 +188,25 @@ class _PdfPageEditorScreenState extends State<PdfPageEditorScreen> {
       );
       return;
     }
+    final removed = _pages[index];
+    final hadAnnotations = removed.isOriginal &&
+        _annotatedOriginalPages.contains(removed.originalPageIndex);
     setState(() {
+      _pushUndo();
       _pages.removeAt(index);
       _hasChanges = true;
     });
+
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(hadAnnotations
+            ? 'Página ${index + 1} eliminada (con sus anotaciones)'
+            : 'Página ${index + 1} eliminada'),
+        action: SnackBarAction(label: 'Deshacer', onPressed: _undo),
+      ),
+    );
   }
 
   /// Shows the bottom sheet with options to add new pages.
@@ -277,6 +346,7 @@ class _PdfPageEditorScreenState extends State<PdfPageEditorScreen> {
 
     // Add pages as "original from external PDF" — we render them to images
     // and insert them as image pages into the editor
+    var undoPushed = false;
     for (int i = 0; i < pageCount; i++) {
       if (!mounted) break;
       final thumbPath = await PdfManipulator.renderPageThumbnail(
@@ -286,6 +356,10 @@ class _PdfPageEditorScreenState extends State<PdfPageEditorScreen> {
       );
       if (thumbPath != null && mounted) {
         setState(() {
+          if (!undoPushed) {
+            _pushUndo(); // Un solo paso de deshacer para todo el lote
+            undoPushed = true;
+          }
           _pages.add(_PageEntry.image(imagePath: thumbPath));
           _hasChanges = true;
         });
@@ -321,48 +395,61 @@ class _PdfPageEditorScreenState extends State<PdfPageEditorScreen> {
       isProcessing: result.needsBackgroundProcessing,
     );
     setState(() {
+      _pushUndo();
       _pages.add(page);
       _hasChanges = true;
     });
 
     if (result.needsBackgroundProcessing) {
-      _processPageInBackground(_pages.length - 1, result);
+      _processPageInBackground(page, result);
     }
   }
 
   /// Runs the deferred perspective warp in a background Isolate with progress.
-  Future<void> _processPageInBackground(int index, ImageEditResult result) async {
+  ///
+  /// Trabaja por identidad de [entry] (no por índice), así reordenar,
+  /// eliminar o deshacer mientras se procesa no afecta a otra página.
+  Future<void> _processPageInBackground(_PageEntry entry, ImageEditResult result) async {
     try {
       final finalPath = await result.backgroundProcessor!(
         (progress) {
-          if (mounted && index < _pages.length) {
-            setState(() => _pages[index].progress = progress);
+          if (mounted) {
+            setState(() => entry.progress = progress);
           }
         },
       );
-      if (mounted && index < _pages.length) {
+      if (mounted) {
         setState(() {
-          _pages[index] = _PageEntry.image(
-            imagePath: finalPath,
-            originalImagePath: _pages[index].originalImagePath,
-            editParams: _pages[index].editParams,
+          _replaceEntry(
+            entry,
+            _PageEntry.image(
+              imagePath: finalPath,
+              originalImagePath: entry.originalImagePath,
+              editParams: entry.editParams,
+            ),
           );
         });
       }
     } catch (e) {
-      debugPrint('Background processing error for page $index: $e');
-      if (mounted && index < _pages.length) {
+      debugPrint('Background processing error: $e');
+      if (mounted) {
         // Fallback: use the original image
-        final origPath = _pages[index].originalImagePath;
+        final origPath = entry.originalImagePath;
+        final pageNumber = _pages.indexOf(entry) + 1;
         setState(() {
-          _pages[index] = _PageEntry.image(
-            imagePath: origPath ?? _pages[index].imagePath ?? '',
-            originalImagePath: origPath,
+          _replaceEntry(
+            entry,
+            _PageEntry.image(
+              imagePath: origPath ?? entry.imagePath ?? '',
+              originalImagePath: origPath,
+            ),
           );
         });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error procesando página ${index + 1}'),
+            content: Text(pageNumber > 0
+                ? 'Error procesando página $pageNumber'
+                : 'Error procesando una página'),
             backgroundColor: Colors.orange,
           ),
         );
@@ -378,16 +465,21 @@ class _PdfPageEditorScreenState extends State<PdfPageEditorScreen> {
 
     final result = await _editImage(page.originalImagePath!, page.editParams);
     if (result != null && mounted) {
+      final newEntry = _PageEntry.image(
+        imagePath: result.editedPath,
+        originalImagePath: page.originalImagePath,
+        editParams: result.params,
+        isProcessing: result.needsBackgroundProcessing,
+      );
+      final i = _pages.indexOf(page);
+      if (i == -1) return;
       setState(() {
-        _pages[index] = _PageEntry.image(
-          imagePath: result.editedPath,
-          originalImagePath: page.originalImagePath,
-          editParams: result.params,
-          isProcessing: result.needsBackgroundProcessing,
-        );
+        _pushUndo();
+        _pages[i] = newEntry;
+        _hasChanges = true;
       });
       if (result.needsBackgroundProcessing) {
-        _processPageInBackground(index, result);
+        _processPageInBackground(newEntry, result);
       }
     }
   }
@@ -431,6 +523,9 @@ class _PdfPageEditorScreenState extends State<PdfPageEditorScreen> {
     final score = widget.score;
     final pdfPath = score.filePath!;
     final title = score.title;
+    // El ScaffoldMessenger raíz sobrevive al pop: lo usamos para ofrecer
+    // "Deshacer" cuando termina el guardado en segundo plano.
+    final messenger = ScaffoldMessenger.of(context);
 
     // Pop back immediately
     Navigator.of(context).pop();
@@ -441,15 +536,19 @@ class _PdfPageEditorScreenState extends State<PdfPageEditorScreen> {
       pageOrder: pageOrder,
       title: title,
       docId: score.docId,
+      messenger: messenger,
     );
   }
 
   /// Applies the edits in the background with global progress reporting.
+  ///
+  /// Las anotaciones se mueven con sus páginas (ver [PageEditRepository]).
   static Future<void> _applyEditsInBackground({
     required String sourcePdfPath,
     required List<PageEditEntry> pageOrder,
     required String title,
     required String docId,
+    required ScaffoldMessengerState messenger,
   }) async {
     final total = pageOrder.length;
     AppData.backgroundTaskProgress.value = BackgroundTaskStatus(
@@ -457,10 +556,11 @@ class _PdfPageEditorScreenState extends State<PdfPageEditorScreen> {
       'Editando "$title" (0/$total)...',
     );
 
+    var success = false;
     try {
-      // 1. Generate new PDF bytes
-      final pdfBytes = await PdfManipulator.applyEdits(
-        sourcePdfPath: sourcePdfPath,
+      await PageEditRepository.applyPageEdits(
+        docId: docId,
+        pdfPath: sourcePdfPath,
         pageOrder: pageOrder,
         onProgress: (current, total) {
           AppData.backgroundTaskProgress.value = BackgroundTaskStatus(
@@ -469,19 +569,7 @@ class _PdfPageEditorScreenState extends State<PdfPageEditorScreen> {
           );
         },
       );
-
-      AppData.backgroundTaskProgress.value = BackgroundTaskStatus(
-        0.90,
-        'Guardando "$title"...',
-      );
-
-      // 2. Write the updated PDF (atomic: write to temp then rename)
-      final tempPath = '$sourcePdfPath.tmp';
-      await File(tempPath).writeAsBytes(pdfBytes, flush: true);
-      await File(tempPath).rename(sourcePdfPath);
-
-      // 3. Invalidate page count cache
-      LibraryRepository.invalidatePageCountCache(sourcePdfPath);
+      success = true;
 
       AppData.backgroundTaskProgress.value = BackgroundTaskStatus(
         1.0,
@@ -499,6 +587,77 @@ class _PdfPageEditorScreenState extends State<PdfPageEditorScreen> {
     } finally {
       AppData.backgroundTaskProgress.value = null;
     }
+
+    if (success) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text('Páginas de "$title" guardadas'),
+          duration: const Duration(seconds: 6),
+          action: SnackBarAction(
+            label: 'Deshacer',
+            onPressed: () => _undoSavedEdit(
+              docId: docId,
+              pdfPath: sourcePdfPath,
+              title: title,
+              messenger: messenger,
+            ),
+          ),
+        ),
+      );
+    }
+  }
+
+  /// Deshace la última edición guardada (PDF + anotaciones).
+  static Future<void> _undoSavedEdit({
+    required String docId,
+    required String pdfPath,
+    required String title,
+    required ScaffoldMessengerState messenger,
+  }) async {
+    try {
+      await PageEditRepository.undoLastEdit(docId: docId, pdfPath: pdfPath);
+      messenger.showSnackBar(
+        SnackBar(content: Text('Se restauró la versión anterior de "$title"')),
+      );
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(content: Text('No se pudo deshacer: $e'), backgroundColor: Colors.red),
+      );
+    }
+  }
+
+  /// Botón "Restaurar versión anterior" (desde el propio editor).
+  Future<void> _confirmUndoSaved() async {
+    final ts = await PageEditRepository.undoTimestamp(widget.score.docId);
+    if (!mounted) return;
+    final when = ts == null
+        ? ''
+        : ' del ${ts.day.toString().padLeft(2, '0')}/${ts.month.toString().padLeft(2, '0')}'
+            ' ${ts.hour.toString().padLeft(2, '0')}:${ts.minute.toString().padLeft(2, '0')}';
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('¿Deshacer la última edición?'),
+        content: Text(
+          'Se restauran las páginas y anotaciones tal como estaban antes de la '
+          'última edición guardada$when.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Restaurar')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+
+    final messenger = ScaffoldMessenger.of(context);
+    Navigator.of(context).pop();
+    await _undoSavedEdit(
+      docId: widget.score.docId,
+      pdfPath: widget.score.filePath!,
+      title: widget.score.title,
+      messenger: messenger,
+    );
   }
 
   // --- Confirmation for discard ---
@@ -547,6 +706,18 @@ class _PdfPageEditorScreenState extends State<PdfPageEditorScreen> {
             style: const TextStyle(fontSize: 18),
           ),
           actions: [
+            if (_undoStack.isNotEmpty)
+              IconButton(
+                onPressed: _undo,
+                icon: const Icon(Icons.undo),
+                tooltip: 'Deshacer',
+              ),
+            if (!_hasChanges && _canUndoSaved)
+              IconButton(
+                onPressed: _confirmUndoSaved,
+                icon: const Icon(Icons.history),
+                tooltip: 'Deshacer última edición guardada',
+              ),
             if (_pages.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.only(right: 8.0),
@@ -581,7 +752,12 @@ class _PdfPageEditorScreenState extends State<PdfPageEditorScreen> {
               )
             : _pages.isEmpty
                 ? _buildEmptyState()
-                : _buildPageList(),
+                : Column(
+                    children: [
+                      if (_annotatedOriginalPages.isNotEmpty) _buildAnnotationsBanner(),
+                      Expanded(child: _buildPageList()),
+                    ],
+                  ),
         bottomNavigationBar: _isLoading
             ? null
             : SafeArea(
@@ -598,6 +774,28 @@ class _PdfPageEditorScreenState extends State<PdfPageEditorScreen> {
                   ),
                 ),
               ),
+      ),
+    );
+  }
+
+  Widget _buildAnnotationsBanner() {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      width: double.infinity,
+      color: scheme.secondaryContainer,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      child: Row(
+        children: [
+          Icon(Icons.draw_outlined, size: 18, color: scheme.onSecondaryContainer),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'Las anotaciones se mueven con sus páginas. Si eliminás una '
+              'página anotada, sus anotaciones se borran (podés deshacer).',
+              style: TextStyle(fontSize: 12, color: scheme.onSecondaryContainer),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -647,6 +845,8 @@ class _PdfPageEditorScreenState extends State<PdfPageEditorScreen> {
           thumbnailPath: page.thumbnailPath,
           pageNumber: index + 1,
           isOriginal: page.isOriginal,
+          hasAnnotations: page.isOriginal &&
+              _annotatedOriginalPages.contains(page.originalPageIndex),
           isProcessing: page.isProcessing,
           progress: page.progress,
           onDelete: () => _removePage(index),
@@ -666,6 +866,7 @@ class _PageTile extends StatelessWidget {
   final String? thumbnailPath;
   final int pageNumber;
   final bool isOriginal;
+  final bool hasAnnotations;
   final bool isProcessing;
   final double progress;
   final VoidCallback onDelete;
@@ -676,6 +877,7 @@ class _PageTile extends StatelessWidget {
     required this.thumbnailPath,
     required this.pageNumber,
     required this.isOriginal,
+    this.hasAnnotations = false,
     this.isProcessing = false,
     this.progress = 0.0,
     required this.onDelete,
@@ -789,6 +991,23 @@ class _PageTile extends StatelessWidget {
                           ),
                         ),
                       ] else ...[
+                        if (hasAnnotations) ...[
+                          Row(
+                            children: [
+                              Icon(Icons.draw_outlined, size: 14, color: Colors.deepPurple[300]),
+                              const SizedBox(width: 4),
+                              Text(
+                                'Con anotaciones',
+                                style: TextStyle(
+                                  color: Colors.deepPurple[300],
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+                        ],
                         Row(
                           children: [
                             if (!isOriginal) ...[

@@ -13,7 +13,7 @@
   <img src="https://img.shields.io/badge/Platform-Android%20|%20Windows%20|%20Web-green?logo=android" alt="Platform"/>
   <img src="https://img.shields.io/badge/Firebase-Auth%20%2B%20Firestore-FFCA28?logo=firebase" alt="Firebase"/>
   <img src="https://img.shields.io/badge/License-Private-lightgrey" alt="License"/>
-  <img src="https://img.shields.io/badge/Version-1.16.0-orange" alt="Version"/>
+  <img src="https://img.shields.io/badge/Version-1.17.0-orange" alt="Version"/>
 </p>
 
 ---
@@ -55,8 +55,12 @@
 - **Eliminar páginas** individuales de un PDF existente.
 - **Agregar páginas** desde cámara, galería, u otro PDF de la biblioteca.
 - **Preservación sin pérdida**: las páginas originales se copian via `PdfTemplate` de Syncfusion, sin re-codificar.
+- **Las anotaciones acompañan a sus páginas**: al reordenar se mueven con ellas; al eliminar una página se borran sus anotaciones. Las páginas anotadas se marcan en el editor.
+- **Deshacer en el editor**: historial completo (mover, eliminar, agregar, re-editar), con atajo "Deshacer" al eliminar.
+- **Deshacer la última edición guardada**: se conserva una versión previa (PDF + anotaciones) por documento, restaurable desde el aviso posterior al guardado o desde el editor.
+- **Guardado seguro**: si algo falla al guardar, PDF y anotaciones vuelven automáticamente al estado anterior.
 - Thumbnails renderizados progresivamente desde el PDF (pdfrx + package:image).
-- Regeneración de PDF en background con progreso global.
+- Regeneración de PDF en background con progreso global; el visor se recarga solo si el documento abierto fue editado.
 - Accesible desde el **menú contextual** de la biblioteca y desde el **visor PDF**.
 
 ### 📄 Lector PDF
@@ -71,6 +75,7 @@
 - **Texto** insertable con tap sobre la página.
 - **Sellos** rápidos (iconos musicales: coda, segno, etc.).
 - Persistencia por página y por documento. Soporte futuro para capas por setlist.
+- **Exportables**: se pueden compartir/exportar "quemadas" sobre el PDF o como datos editables (`.setlist`).
 - **Undo / Redo** global y borrado de página.
 - Preferencias de herramientas (último color/grosor usado) guardadas automáticamente.
 
@@ -78,8 +83,8 @@
 - Crea listas de reproducción ordenadas con tus partituras.
 - **Modo Vivo**: navegación fluida entre partituras con un solo tap, ideal para conciertos.
 - Reordenamiento con drag & drop.
-- **Compartir como ZIP**: archivos ordenados con nombre legible (`01 - Tema.pdf`).
-- **Compartir como `.setlist`**: formato propietario reimportable por otros usuarios de Atril.
+- **Compartir como ZIP**: archivos ordenados con nombre legible (`01 - Tema.pdf`), con o sin anotaciones aplicadas.
+- **Compartir como `.setlist`**: formato propietario reimportable por otros usuarios de Atril; opcionalmente incluye las anotaciones **editables**.
 
 ### 🗑️ Papelera de Reciclaje
 - Los elementos eliminados se ocultan de la interfaz principal (Soft Delete).
@@ -89,13 +94,14 @@
 
 ### 💾 Backup y Exportación
 - **Backup completo** (`.atril`): empaqueta la base de datos + todos los PDFs en un solo archivo comprimido.
-- **Importación de backup**: agrega el contenido de un backup a la biblioteca existente sin reemplazar.
+- **Importación de backup**: agrega el contenido de un backup a la biblioteca existente sin reemplazar, **incluyendo las anotaciones**.
 - **Restauración destructiva**: reemplaza toda la biblioteca con un backup anterior.
-- **Exportación para PC**: genera un ZIP legible con la estructura de carpetas y nombres originales.
+- **Exportación para PC**: genera un ZIP legible con la estructura de carpetas y nombres originales, **con o sin anotaciones** aplicadas sobre los PDFs (títulos repetidos en una carpeta se desambiguan como `Título (2).pdf`).
 - Todo procesado con **Isolates** y barras de progreso en tiempo real.
 
 ### 📤 Compartir / Importar (100% Offline)
-- **Compartir PDF individual** desde el menú contextual (⋮) con nombre de display.
+- **Compartir PDF individual** desde el menú contextual (⋮) o desde el **visor PDF**, con nombre de display.
+- **Con o sin anotaciones**: si el documento tiene anotaciones, Atril pregunta si incluirlas. "Con anotaciones" las dibuja sobre una **copia** del PDF (vectorial para trazos y texto); el original nunca se modifica. Si no hay anotaciones, comparte directo.
 - **Compartir Setlist** como ZIP universal o `.setlist` propietario.
 - **Importar `.setlist`**: al tocar un archivo recibido (WhatsApp, email, etc.), Atril lo abre automáticamente, crea una carpeta en la biblioteca con todos los PDFs y genera el setlist.
 - **Detección inteligente**: identifica el tipo de archivo por contenido (header ZIP + `data.json`), no por extensión.
@@ -139,6 +145,8 @@ UI (Screens & Widgets)            ▼
               ├── AnnotationRepository
               ├── SettingsRepository
               ├── BackupManager
+              ├── ExportManager ── PdfAnnotationFlattener
+              ├── PageEditRepository ── PdfManipulator
               └── PdfGenerator
                        │
               ┌────────┴────────┐
@@ -166,25 +174,28 @@ lib/
 │       ├── annotation_repository.dart   # Trazos de tinta vectoriales
 │       ├── settings_repository.dart     # Preferencias (tema, escala, etc.)
 │       ├── pdf_generator.dart           # Generación de PDF desde imágenes
-│       └── pdf_manipulator.dart         # Edición estructural de PDFs (reorder, delete, insert)
+│       ├── pdf_manipulator.dart         # Edición estructural de PDFs (reorder, delete, insert)
+│       ├── page_edit_repository.dart    # Edición de páginas preservando anotaciones + deshacer
+│       └── pdf_annotation_flattener.dart # "Quema" anotaciones sobre una copia del PDF para exportar
 ├── models/
 │   ├── score.dart             # Modelo de partitura
 │   ├── folder.dart            # Modelo de carpeta
 │   ├── setlist.dart           # Modelo de setlist
 │   ├── setlist_nav_context.dart # Contexto de navegación en setlist
 │   ├── annotation_stroke.dart # Modelo de trazo/anotación
+│   ├── annotation_style.dart  # Estilo visual de anotaciones (compartido visor/exportación)
 │   └── app_data_types.dart    # Tipos compartidos (BackgroundTaskStatus, etc.)
 ├── screens/
 │   ├── auth_gate.dart         # Flujo de autenticación y verificación de permisos
 │   ├── login_screen.dart      # Login (Google + email/contraseña)
 │   ├── onboarding_screen.dart # Registro de perfil para usuarios nuevos
 │   ├── home_shell.dart        # Shell con NavigationBar (Biblioteca / Setlists)
-│   ├── library/               # Pantallas de biblioteca, scanner, editor de imagen, editor de páginas PDF
+│   ├── library/               # Biblioteca, scanner, editor de imagen, editor de páginas PDF, acciones de exportación
 │   ├── reader/                # Visor PDF, capa de anotaciones, toolbar
 │   ├── setlists/              # CRUD de setlists, detalle, modo vivo
 │   ├── settings/              # Configuración general
 │   └── trash/                 # Papelera de reciclaje
-└── widgets/                   # Componentes reutilizables (breadcrumbs, diálogos, etc.)
+└── widgets/                   # Componentes reutilizables (breadcrumbs, diálogos de exportación, etc.)
 ```
 
 ---

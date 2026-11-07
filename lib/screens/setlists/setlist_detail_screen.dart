@@ -5,6 +5,7 @@ import '../../models/setlist.dart';
 import '../../models/score.dart';
 import 'add_to_setlist_screen.dart';
 import '../library/photo_scanner_screen.dart';
+import '../library/export_actions.dart';
 import '../reader/live_setlist_screen.dart';
 import '../reader/pdf_viewer_screen.dart';
 
@@ -202,22 +203,10 @@ class _SetlistDetailScreenState extends State<SetlistDetailScreen> {
                 onSelected: (v) {
                   if (v == 'delete_setlist') _confirmDeleteSetlist(setlist);
                   if (v == 'share_zip') {
-                    AppData.shareSetlist(setlist, format: SetlistExportFormat.zip).catchError((e) {
-                      if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('Error: $e')),
-                        );
-                      }
-                    });
+                    ExportActions.shareSetlist(context, setlist, SetlistExportFormat.zip);
                   }
                   if (v == 'share_setlist') {
-                    AppData.shareSetlist(setlist, format: SetlistExportFormat.setlist).catchError((e) {
-                      if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('Error: $e')),
-                        );
-                      }
-                    });
+                    ExportActions.shareSetlist(context, setlist, SetlistExportFormat.setlist);
                   }
                 },
                 itemBuilder: (context) => [

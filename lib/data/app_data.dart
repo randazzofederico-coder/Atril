@@ -435,11 +435,17 @@ class AppData {
   }
 
   // --- EXPORT / SHARE ---
-  static Future<void> sharePdf(Score score) =>
-      ExportManager.instance.sharePdf(score);
+  static Future<void> sharePdf(Score score, {bool includeAnnotations = false}) =>
+      ExportManager.instance.sharePdf(score, includeAnnotations: includeAnnotations);
 
-  static Future<void> shareSetlist(Setlist setlist, {required SetlistExportFormat format}) =>
-      ExportManager.instance.shareSetlist(setlist, format: format);
+  static Future<bool> hasAnnotations(String docId) =>
+      ExportManager.instance.hasAnnotations(docId);
+
+  static Future<bool> anyHasAnnotations(Iterable<String> docIds) =>
+      ExportManager.instance.anyHasAnnotations(docIds);
+
+  static Future<void> shareSetlist(Setlist setlist, {required SetlistExportFormat format, bool includeAnnotations = false}) =>
+      ExportManager.instance.shareSetlist(setlist, format: format, includeAnnotations: includeAnnotations);
 
   static Future<String?> importSetlistFile(String filePath) =>
       ExportManager.instance.importSetlistFile(filePath);

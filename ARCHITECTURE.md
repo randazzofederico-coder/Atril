@@ -1,8 +1,8 @@
 # ARCHITECTURE.md — Atril Digital (Flutter)
 
-**Estado del Proyecto:** Consolidación — **v1.16.0 (Compartir/Importar Setlists)**
-**Fecha de Análisis:** Junio 2026
-**Objetivo:** Compartir PDFs y setlists offline, importar archivos `.setlist` recibidos.
+**Estado del Proyecto:** Consolidación — **v1.17.0 (Exportación con anotaciones + Editor de páginas que preserva anotaciones)**
+**Fecha de Análisis:** Noviembre 2026
+**Objetivo:** Compartir/exportar con o sin anotaciones y que la edición de páginas nunca pierda anotaciones.
 
 ---
 
@@ -59,6 +59,8 @@ Contiene la lógica de negocio pura. Ubicación: `lib/data/repositories/`.
 * **`FileReceiverChannel`:** Canal de plataforma (`MethodChannel`) para recibir archivos abiertos desde otras apps. Maneja cold start y hot resume.
 * **`PdfGenerator`:** Generación de PDFs multi-página desde imágenes usando Syncfusion.
 * **`PdfManipulator`:** Manipulación de estructura de PDFs existentes: renderizado de thumbnails (pdfrx), reordenamiento y eliminación de páginas (Syncfusion templates), inserción de nuevas páginas de imagen.
+* **`PageEditRepository`:** Orquesta la edición de páginas: genera el PDF (vía `PdfManipulator`), reubica las anotaciones según el nuevo orden (`remapAnnotationPages`, transaccional) y guarda un punto de restauración (PDF + anotaciones) en `atril/page_edit_undo/<docId>/` para deshacer. Si falla el guardado, restaura automáticamente. Notifica a los visores (`editRevision`) para que recarguen.
+* **`PdfAnnotationFlattener`:** "Quema" las anotaciones sobre una **copia** del PDF para exportar (Syncfusion, en Isolate). Trazos y texto Latin-1 como vectores; sellos y texto no Latin-1 rasterizados en el main isolate. Respeta `/Rotate`. Comparte estilo con el visor vía `AnnotationStyle`.
 
 #### **D. Capa de Persistencia**
 * **Base de Datos:** `drift` (SQLite). Esquema tipado y migraciones.
@@ -108,6 +110,9 @@ La base de datos (`AppDatabase`) define la estructura core:
     * Preservación sin pérdida de páginas originales via `PdfTemplate` de Syncfusion.
     * Regeneración de PDF en background con progreso global.
     * Accesible desde el menú contextual de la biblioteca y desde el visor PDF.
+    * **Anotaciones preservadas:** se mueven con sus páginas; las de páginas eliminadas se borran. Páginas anotadas marcadas en el editor.
+    * **Deshacer:** historial en el editor + deshacer la última edición guardada (un nivel por documento, PDF + anotaciones).
+    * El visor abierto se recarga automáticamente tras editar/deshacer.
 * **Lector PDF (**`pdfrx`**):**
     * Navegación entre documentos y **Scrubber Vertical** (throttled).
     * Soporte para anotaciones con Lápiz y Resaltador por página/setlist.
@@ -121,9 +126,11 @@ La base de datos (`AppDatabase`) define la estructura core:
         * **Auto-cleanup**: Eliminación física automática tras 30 días.
         * Integración inteligente con backups e importaciones.
 * **Compartir / Exportar (Offline):**
-    * **Compartir PDF individual** desde el menú contextual (⋮) con nombre de display.
+    * **Compartir PDF individual** desde el menú contextual (⋮) o el visor PDF, con nombre de display.
+    * **Con o sin anotaciones** (`ExportActions` + `askIncludeAnnotations`): solo se pregunta si hay anotaciones involucradas. "Con anotaciones" usa `PdfAnnotationFlattener` sobre copias temporales; el original nunca se modifica.
+    * **Exportar biblioteca para PC** (ZIP) con o sin anotaciones; nombres duplicados desambiguados.
     * **Compartir Setlist como ZIP**: Archivos ordenados con zero-padding (`01 - Tema.pdf`).
-    * **Compartir Setlist como `.setlist`**: Formato propietario con `data.json` + PDFs.
+    * **Compartir Setlist como `.setlist`**: Formato propietario con `data.json` + PDFs. Opcionalmente incluye `annotations` por item (editables al importar; retrocompatible).
     * Compresión en **Isolate** con barra de progreso en tiempo real.
     * Accesible desde menú ⋮ de PDFs, lista de setlists y detalle de setlist.
 * **Importar Setlists (`.setlist`):**
@@ -132,6 +139,7 @@ La base de datos (`AppDatabase`) define la estructura core:
     * **Detección por contenido** (no por extensión): verifica header ZIP + presencia de `data.json`.
     * Descompresión en Isolate → importación de PDFs en carpeta dedicada → creación de setlist.
     * Código nativo: `MainActivity.kt` (Android) + `AppDelegate.swift` (iOS).
+* **Importar Backup (merge):** ahora migra también las anotaciones (capa global) de los documentos importados.
 
 ### 🔮 Próximos Pasos
 * **Nuevas Herramientas de Anotación:** Texto enriquecido, Formas geométricas, Sellos musicales.
@@ -144,14 +152,14 @@ La base de datos (`AppDatabase`) define la estructura core:
 ```text
 lib/
 ├── data/
-│   ├── repositories/       # Lógica (Library, Setlist, Import, PdfGenerator, etc.)
+│   ├── repositories/       # Lógica (Library, Setlist, Import, PdfGenerator, PageEdit, AnnotationFlattener, etc.)
 │   ├── app_data.dart       # Fachada Global (Orquestador)
 │   ├── app_database.dart   # Definición de Schema Drift
 │   ├── library_storage.dart# Abstracción de FileSystem
 │   ├── backup_manager.dart # Backup/Restore con Isolates
 │   ├── export_manager.dart # Compartir/Importar PDFs y Setlists
 │   └── file_receiver_channel.dart # MethodChannel para archivos entrantes
-├── models/                 # POJOs y Entidades (Score, Setlist, Stroke)
+├── models/                 # POJOs y Entidades (Score, Setlist, Stroke, AnnotationStyle)
 ├── screens/                # Library, Reader, Setlists, Settings
 └── widgets/                # UI Components Reutilizables
 ```

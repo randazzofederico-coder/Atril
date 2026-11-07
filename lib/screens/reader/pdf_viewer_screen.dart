@@ -11,6 +11,8 @@ import '../../models/annotation_stroke.dart';
 import '../../models/score.dart';
 import '../../data/app_data.dart';
 import '../library/pdf_page_editor_screen.dart';
+import '../library/export_actions.dart';
+import '../../data/repositories/page_edit_repository.dart';
 
 class PdfViewerScreen extends StatefulWidget {
   final List<Score> sourceScores;
@@ -55,6 +57,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
     super.initState();
     _currentIndex = widget.initialIndex;
     _openScore(_currentIndex);
+    PageEditRepository.editRevision.addListener(_onPagesEdited);
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
@@ -63,10 +66,20 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
 
   @override
   void dispose() {
+    PageEditRepository.editRevision.removeListener(_onPagesEdited);
     _pageHintTimer?.cancel();
     // _controller?.dispose(); // Not required/available in pdfrx
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     super.dispose();
+  }
+
+  /// Si se editaron (o deshicieron) las páginas del documento abierto,
+  /// se remonta el visor para mostrar el PDF y las anotaciones actualizados.
+  void _onPagesEdited() {
+    if (!mounted) return;
+    if (PageEditRepository.lastEditedDocId == _currentScore.docId) {
+      _openScore(_currentIndex);
+    }
   }
 
   // --- Logic ---
@@ -491,6 +504,12 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
                                   ],
                                 ),
                               ),
+                              if (!_editMode)
+                                IconButton(
+                                  onPressed: () => ExportActions.shareScore(context, score),
+                                  icon: const Icon(Icons.share, color: Colors.white),
+                                  tooltip: 'Compartir',
+                                ),
                               if (!_editMode)
                                 IconButton(
                                   onPressed: () {

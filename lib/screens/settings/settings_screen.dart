@@ -4,6 +4,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../data/backup_manager.dart';
 import '../../data/app_data.dart';
 import '../trash/trash_bin_screen.dart';
+import '../library/export_actions.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -261,7 +262,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ListTile(
           leading: const Icon(Icons.drive_file_move_outline),
           title: const Text('Exportar para PC'),
-          subtitle: const Text('Guardar biblioteca como carpeta ZIP'),
+          subtitle: const Text('Guardar biblioteca como carpeta ZIP (con o sin anotaciones)'),
           onTap: _doExportZip,
         ),
         ListTile(
@@ -289,8 +290,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _doExportZip() async {
     setState(() => _loading = true);
     try {
-      await BackupManager.instance.exportLibraryToZip(context);
-      if (mounted) {
+      final done = await ExportActions.exportLibraryZip(context);
+      if (done && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Exportación lista.')),
         );

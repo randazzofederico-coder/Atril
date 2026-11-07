@@ -389,6 +389,78 @@ class AppDatabase extends _$AppDatabase {
     return (query..orderBy([(t) => OrderingTerm.asc(t.createdAt)])).get();
   }
 
+  /// Todos los trazos de un documento (todas las páginas), ordenados por creación.
+  /// Por defecto solo la capa global (setlistId = null).
+  Future<List<AnnotationStrokesTableData>> getAnnotationStrokesForDoc({
+    required String docId,
+    String? setlistId,
+  }) {
+    var query = select(annotationStrokesTable)..where((t) => t.docId.equals(docId));
+    if (setlistId == null) {
+      query = query..where((t) => t.setlistId.isNull());
+    } else {
+      query = query..where((t) => t.setlistId.equals(setlistId));
+    }
+    return (query
+          ..orderBy([
+            (t) => OrderingTerm.asc(t.pageIndex),
+            (t) => OrderingTerm.asc(t.createdAt),
+          ]))
+        .get();
+  }
+
+  /// Todos los trazos de la DB (usado al importar/mergear backups).
+  Future<List<AnnotationStrokesTableData>> getAllAnnotationStrokes() {
+    return select(annotationStrokesTable).get();
+  }
+
+  /// Todos los trazos de un documento en TODAS las capas (global + setlists).
+  Future<List<AnnotationStrokesTableData>> getAllAnnotationStrokesForDocAllLayers(String docId) {
+    return (select(annotationStrokesTable)..where((t) => t.docId.equals(docId))).get();
+  }
+
+  /// Reubica los trazos de un documento tras editar sus páginas.
+  ///
+  /// [pageMapping]: página vieja (1-based) → página nueva (1-based).
+  /// Los trazos de páginas que no figuran en el mapa (páginas eliminadas)
+  /// se borran. Aplica a todas las capas. Atómico (transacción).
+  Future<void> remapAnnotationPages(String docId, Map<int, int> pageMapping) async {
+    await transaction(() async {
+      final rows = await getAllAnnotationStrokesForDocAllLayers(docId);
+      for (final r in rows) {
+        final newPage = pageMapping[r.pageIndex];
+        if (newPage == null) {
+          await (delete(annotationStrokesTable)..where((t) => t.id.equals(r.id))).go();
+        } else if (newPage != r.pageIndex) {
+          await (update(annotationStrokesTable)..where((t) => t.id.equals(r.id)))
+              .write(AnnotationStrokesTableCompanion(pageIndex: Value(newPage)));
+        }
+      }
+    });
+  }
+
+  /// Reemplaza TODOS los trazos de un documento por [rows] (usado para deshacer).
+  Future<void> replaceAnnotationsForDoc(String docId, List<AnnotationStrokesTableData> rows) async {
+    await transaction(() async {
+      await (delete(annotationStrokesTable)..where((t) => t.docId.equals(docId))).go();
+      for (final r in rows) {
+        await into(annotationStrokesTable).insertOnConflictUpdate(r);
+      }
+    });
+  }
+
+  /// IDs de documentos que tienen al menos una anotación en la capa global.
+  Future<Set<String>> getAnnotatedDocIds() async {
+    final query = selectOnly(annotationStrokesTable, distinct: true)
+      ..addColumns([annotationStrokesTable.docId])
+      ..where(annotationStrokesTable.setlistId.isNull());
+    final rows = await query.get();
+    return rows
+        .map((r) => r.read(annotationStrokesTable.docId))
+        .whereType<String>()
+        .toSet();
+  }
+
   Future<void> insertAnnotationStroke(AnnotationStrokesTableCompanion entry) async {
     await into(annotationStrokesTable).insertOnConflictUpdate(entry);
   }

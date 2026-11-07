@@ -4,6 +4,29 @@ import '../app_database.dart'; // To access table data classes
 import '../app_data.dart';
 
 class AnnotationRepository {
+
+  /// Convierte una fila de Drift al modelo de dominio.
+  static AnnotationStroke fromRow(AnnotationStrokesTableData r) {
+    return AnnotationStroke.fromDbMap({
+      'id': r.id,
+      'doc_id': r.docId,
+      'setlist_id': r.setlistId,
+      'page_index': r.pageIndex,
+      'tool': r.tool,
+      'width': r.width,
+      'points_json': r.pointsJson,
+      'created_at': r.createdAt,
+    });
+  }
+
+  /// Todos los trazos (capa global) de un documento, todas las páginas.
+  static Future<List<AnnotationStroke>> getAnnotationStrokesForDoc(String docId) async {
+    final rows = await AppData.db.getAnnotationStrokesForDoc(docId: docId);
+    return rows.map(fromRow).toList();
+  }
+
+  /// IDs de documentos que tienen anotaciones en la capa global.
+  static Future<Set<String>> getAnnotatedDocIds() => AppData.db.getAnnotatedDocIds();
   
   static Future<List<AnnotationStroke>> getAnnotationStrokesForPage({
     required String docId, 
@@ -15,16 +38,7 @@ class AnnotationRepository {
       pageIndex: pageIndex, 
       setlistId: setlistId
     );
-    return rows.map((r) => AnnotationStroke.fromDbMap({
-      'id': r.id,
-      'doc_id': r.docId,
-      'setlist_id': r.setlistId,
-      'page_index': r.pageIndex,
-      'tool': r.tool,
-      'width': r.width,
-      'points_json': r.pointsJson,
-      'created_at': r.createdAt,
-    })).toList();
+    return rows.map(fromRow).toList();
   }
 
   static Future<void> insertAnnotationStroke(AnnotationStroke s) async {

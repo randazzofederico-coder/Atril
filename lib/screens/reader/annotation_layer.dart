@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../../data/app_data.dart';
 import '../../models/annotation_stroke.dart';
+import '../../models/annotation_style.dart';
 
 /// Overlay layer that displays and (optionally) edits non-destructive annotations.
 ///
@@ -427,14 +428,8 @@ class _AnnotationPainter extends CustomPainter {
      }
   }
 
-  Color _defaultColorForTool(AnnotationTool tool) {
-    switch (tool) {
-      case AnnotationTool.pen: return Colors.black;
-      case AnnotationTool.highlighter: return Colors.yellow;
-      case AnnotationTool.whiteout: return Colors.white;
-      default: return Colors.black;
-    }
-  }
+  Color _defaultColorForTool(AnnotationTool tool) =>
+      AnnotationStyle.defaultColorForTool(tool);
 
   void _paintStroke(
     Canvas canvas,
@@ -453,7 +448,7 @@ class _AnnotationPainter extends CustomPainter {
       ..strokeJoin = StrokeJoin.round
       ..isAntiAlias = true
       ..color = tool == AnnotationTool.highlighter
-          ? color.withValues(alpha: 0.40)  // Highlighter always semi-transparent
+          ? color.withValues(alpha: AnnotationStyle.highlighterAlpha)  // Highlighter always semi-transparent
           : color;
     
     // Whiteout logic
@@ -472,42 +467,14 @@ class _AnnotationPainter extends CustomPainter {
   }
 
   void _paintText(Canvas canvas, Size size, Offset normPos, String text, Color color) {
-    final textSpan = TextSpan(
-      text: text,
-      style: TextStyle(color: color, fontSize: 16, fontWeight: FontWeight.bold),
-    );
-    final textPainter = TextPainter(
-      text: textSpan,
-      textDirection: TextDirection.ltr,
-    );
-    textPainter.layout(minWidth: 0, maxWidth: size.width);
+    final textPainter = AnnotationStyle.textPainter(text, color, maxWidth: size.width);
     
     final offset = Offset(normPos.dx * size.width, normPos.dy * size.height);
     textPainter.paint(canvas, offset);
   }
 
   void _paintStamp(Canvas canvas, Size size, Offset normPos, String stampId, Color color) {
-     IconData icon;
-     switch(stampId) {
-       case 'coda': icon = Icons.music_note; break; 
-       case 'segno': icon = Icons.repeat; break;
-       case 'warning': icon = Icons.warning_amber_rounded; break;
-       default: icon = Icons.star;
-     }
-
-     final painter = TextPainter(
-       text: TextSpan(
-         text: String.fromCharCode(icon.codePoint),
-         style: TextStyle(
-           color: color, 
-           fontSize: 32, 
-           fontFamily: icon.fontFamily,
-           package: icon.fontPackage,
-         ),
-       ),
-       textDirection: TextDirection.ltr,
-     );
-     painter.layout();
+     final painter = AnnotationStyle.stampPainter(stampId, color);
      
      final x = (normPos.dx * size.width) - (painter.width / 2);
      final y = (normPos.dy * size.height) - (painter.height / 2);

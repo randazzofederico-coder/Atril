@@ -4,6 +4,7 @@ import '../../models/setlist.dart';
 import '../../models/score.dart';
 import '../../models/folder.dart';
 import '../app_data.dart';
+import 'page_edit_repository.dart';
 
 class LibraryRepository {
   
@@ -332,6 +333,7 @@ class LibraryRepository {
     // 2. Borrar datos de la partitura
     await AppData.db.deleteDocStateByDocId(docId);
     await AppData.db.deleteDocById(docId);
+    await PageEditRepository.discardUndo(docId);
     
     // Obtenemos path absoluto para borrar archivo físico
     final absPath = AppData.storage.absPathFromRelPath(dData.internalRelPath);

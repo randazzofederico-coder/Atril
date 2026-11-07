@@ -9,6 +9,8 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
 import 'app_data.dart';
+import 'repositories/pdf_annotation_flattener.dart';
+import '../models/annotation_stroke.dart';
 import '../models/score.dart';
 import '../models/setlist.dart';
 
@@ -24,12 +26,31 @@ class ExportManager {
   static final ExportManager instance = ExportManager._();
 
   // ---------------------------------------------------------------------------
+  // 0. CONSULTAS DE ANOTACIONES
+  // ---------------------------------------------------------------------------
+
+  /// `true` si el documento tiene anotaciones (capa global).
+  Future<bool> hasAnnotations(String docId) async {
+    final ids = await AnnotationRepository.getAnnotatedDocIds();
+    return ids.contains(docId);
+  }
+
+  /// `true` si alguno de los documentos tiene anotaciones (capa global).
+  Future<bool> anyHasAnnotations(Iterable<String> docIds) async {
+    final ids = await AnnotationRepository.getAnnotatedDocIds();
+    return docIds.any(ids.contains);
+  }
+
+  // ---------------------------------------------------------------------------
   // 1. COMPARTIR PDF INDIVIDUAL
   // ---------------------------------------------------------------------------
 
   /// Comparte un PDF individual invocando el menú nativo del sistema operativo.
   /// El archivo se comparte con el título de display (no el ID interno).
-  Future<void> sharePdf(Score score) async {
+  ///
+  /// Si [includeAnnotations] es `true`, se comparte una copia con las
+  /// anotaciones "quemadas" en el PDF (el original no se modifica).
+  Future<void> sharePdf(Score score, {bool includeAnnotations = false}) async {
     if (score.filePath == null) {
       throw Exception('El archivo no tiene una ruta asignada.');
     }
@@ -45,9 +66,26 @@ class ExportManager {
     if (!displayName.toLowerCase().endsWith('.pdf')) {
       displayName += '.pdf';
     }
-    final tempFile = await file.copy(p.join(tempDir.path, displayName));
+    final tempPath = p.join(tempDir.path, displayName);
 
-    await Share.shareXFiles([XFile(tempFile.path)]);
+    if (includeAnnotations) {
+      try {
+        AppData.backgroundTaskProgress.value =
+            const BackgroundTaskStatus(0.0, 'Aplicando anotaciones...');
+        await Future.delayed(const Duration(milliseconds: 50));
+        await PdfAnnotationFlattener.flattenToFile(
+          docId: score.docId,
+          sourcePath: file.path,
+          outputPath: tempPath,
+        );
+      } finally {
+        AppData.backgroundTaskProgress.value = null;
+      }
+    } else {
+      await file.copy(tempPath);
+    }
+
+    await Share.shareXFiles([XFile(tempPath, mimeType: 'application/pdf')]);
   }
 
   // ---------------------------------------------------------------------------
@@ -56,13 +94,21 @@ class ExportManager {
 
   /// Punto de entrada unificado para compartir un setlist en cualquier formato.
   /// La UI llama a este método con el [format] deseado.
-  Future<void> shareSetlist(Setlist setlist, {required SetlistExportFormat format}) async {
+  ///
+  /// [includeAnnotations]:
+  /// - ZIP: los PDFs se exportan con las anotaciones aplicadas (aplanadas).
+  /// - .setlist: las anotaciones viajan como datos editables en `data.json`.
+  Future<void> shareSetlist(
+    Setlist setlist, {
+    required SetlistExportFormat format,
+    bool includeAnnotations = false,
+  }) async {
     switch (format) {
       case SetlistExportFormat.zip:
-        await shareSetlistAsZip(setlist);
+        await shareSetlistAsZip(setlist, includeAnnotations: includeAnnotations);
         break;
       case SetlistExportFormat.setlist:
-        await shareSetlistAsSetlistFile(setlist);
+        await shareSetlistAsSetlistFile(setlist, includeAnnotations: includeAnnotations);
         break;
     }
   }
@@ -73,7 +119,8 @@ class ExportManager {
 
   /// Empaqueta los PDFs del setlist en un .zip con nombres ordenados
   /// por zero-padding (ej. "01 - Primer Tema.pdf", "02 - Segundo Tema.pdf").
-  Future<void> shareSetlistAsZip(Setlist setlist) async {
+  Future<void> shareSetlistAsZip(Setlist setlist, {bool includeAnnotations = false}) async {
+    Directory? workDir;
     try {
       // 0. Feedback inmediato
       AppData.backgroundTaskProgress.value =
@@ -98,11 +145,17 @@ class ExportManager {
         final prefix = (i + 1).toString().padLeft(padWidth, '0');
         final safeTitle = _sanitizeFilename(score.title);
         final zipEntryName = '$prefix - $safeTitle.pdf';
-        entries.add(_ExportFileEntry(score.filePath!, zipEntryName));
+        entries.add(_ExportFileEntry(score.filePath!, zipEntryName, docId: score.docId));
       }
 
       if (entries.isEmpty) {
         throw Exception('No se encontraron archivos PDF para exportar.');
+      }
+
+      // 3b. Aplicar anotaciones (copias temporales)
+      if (includeAnnotations) {
+        workDir = await createExportWorkDir();
+        await _applyAnnotationsToEntries(entries, workDir);
       }
 
       // 4. Preparar destino temporal
@@ -138,6 +191,7 @@ class ExportManager {
       }
 
       AppData.backgroundTaskProgress.value = null;
+      await _deleteDirQuietly(workDir);
 
       // 7. Compartir
       await Share.shareXFiles(
@@ -148,6 +202,8 @@ class ExportManager {
       AppData.backgroundTaskProgress.value = null;
       debugPrint('Error compartiendo setlist como ZIP: $e');
       rethrow;
+    } finally {
+      await _deleteDirQuietly(workDir);
     }
   }
 
@@ -157,7 +213,11 @@ class ExportManager {
 
   /// Empaqueta los PDFs y un `data.json` con la metadata del setlist
   /// en un archivo con extensión `.setlist` (internamente un ZIP).
-  Future<void> shareSetlistAsSetlistFile(Setlist setlist) async {
+  ///
+  /// Si [includeAnnotations] es `true`, cada item lleva sus anotaciones como
+  /// datos (`annotations`), de modo que quien lo importe en Atril las recibe
+  /// editables. Los PDFs viajan siempre limpios (originales).
+  Future<void> shareSetlistAsSetlistFile(Setlist setlist, {bool includeAnnotations = false}) async {
     try {
       // 0. Feedback inmediato
       AppData.backgroundTaskProgress.value =
@@ -182,11 +242,28 @@ class ExportManager {
         final filename = '${score.docId}.pdf';
         entries.add(_ExportFileEntry(score.filePath!, filename));
 
-        itemsJson.add({
+        final item = <String, dynamic>{
           'index': i,
           ...score.toJsonMap(),
           'filename': filename,
-        });
+        };
+
+        if (includeAnnotations) {
+          final strokes =
+              await AnnotationRepository.getAnnotationStrokesForDoc(score.docId);
+          if (strokes.isNotEmpty) {
+            item['annotations'] = strokes.map((s) {
+              final m = s.toDbMap();
+              // IDs locales: se regeneran al importar
+              m.remove('id');
+              m.remove('doc_id');
+              m.remove('setlist_id');
+              return m;
+            }).toList();
+          }
+        }
+
+        itemsJson.add(item);
       }
 
       if (entries.isEmpty) {
@@ -349,6 +426,25 @@ class ExportManager {
           folderId: folderId, // Dentro de la carpeta del setlist
         );
 
+        // Anotaciones editables (opcionales; formato retrocompatible)
+        final annotations = item['annotations'];
+        if (annotations is List) {
+          for (final raw in annotations) {
+            if (raw is! Map) continue;
+            try {
+              final stroke = AnnotationStroke.fromDbMap({
+                ...raw.cast<String, Object?>(),
+                'id': AppData.newId(prefix: 'stk'),
+                'doc_id': newDocId,
+                'setlist_id': null,
+              });
+              await AnnotationRepository.insertAnnotationStroke(stroke);
+            } catch (e) {
+              debugPrint('Warning: anotación inválida en $filename: $e');
+            }
+          }
+        }
+
         newDocIds.add(newDocId);
 
         AppData.backgroundTaskProgress.value = BackgroundTaskStatus(
@@ -394,6 +490,77 @@ class ExportManager {
   // HELPERS
   // ---------------------------------------------------------------------------
 
+  /// Crea un directorio temporal de trabajo para copias aplanadas.
+  Future<Directory> createExportWorkDir() async {
+    final tempDir = await getTemporaryDirectory();
+    final dir = Directory(
+      p.join(tempDir.path, 'export_work_${DateTime.now().millisecondsSinceEpoch}'),
+    );
+    await dir.create(recursive: true);
+    return dir;
+  }
+
+  Future<void> _deleteDirQuietly(Directory? dir) async {
+    if (dir == null) return;
+    try {
+      if (await dir.exists()) await dir.delete(recursive: true);
+    } catch (_) {}
+  }
+
+  /// Borra un directorio de trabajo ignorando errores.
+  Future<void> deleteDirQuietly(Directory? dir) => _deleteDirQuietly(dir);
+
+  /// Para cada documento de [sources] (docId → ruta del PDF original) que tenga
+  /// anotaciones, genera una copia con las anotaciones aplicadas dentro de
+  /// [workDir]. Reporta progreso en [AppData.backgroundTaskProgress].
+  ///
+  /// Devuelve docId → ruta del PDF aplanado (solo los que tenían anotaciones).
+  Future<Map<String, String>> flattenAnnotatedDocs(
+    Map<String, String> sources,
+    Directory workDir,
+  ) async {
+    final annotated = await AnnotationRepository.getAnnotatedDocIds();
+    final targets = sources.keys.where(annotated.contains).toList();
+    final result = <String, String>{};
+
+    for (int i = 0; i < targets.length; i++) {
+      final docId = targets[i];
+      AppData.backgroundTaskProgress.value = BackgroundTaskStatus(
+        i / targets.length,
+        'Aplicando anotaciones (${i + 1}/${targets.length})...',
+      );
+      final outPath = p.join(workDir.path, '$docId.pdf');
+      try {
+        await PdfAnnotationFlattener.flattenToFile(
+          docId: docId,
+          sourcePath: sources[docId]!,
+          outputPath: outPath,
+        );
+        result[docId] = outPath;
+      } catch (e) {
+        // Si un PDF falla, exportamos el original en vez de abortar todo.
+        debugPrint('Warning: no se pudieron aplicar anotaciones a $docId: $e');
+      }
+    }
+    return result;
+  }
+
+  /// Reemplaza el origen de cada entrada por su versión aplanada (si aplica).
+  Future<void> _applyAnnotationsToEntries(
+    List<_ExportFileEntry> entries,
+    Directory workDir,
+  ) async {
+    final sources = <String, String>{
+      for (final e in entries)
+        if (e.docId != null) e.docId!: e.sourcePath,
+    };
+    final flattened = await flattenAnnotatedDocs(sources, workDir);
+    for (final e in entries) {
+      final f = flattened[e.docId];
+      if (f != null) e.sourcePath = f;
+    }
+  }
+
   /// Remueve caracteres ilegales para nombres de archivo.
   String _sanitizeFilename(String name) {
     return name.replaceAll(RegExp(r'[<>:"/\\|?*]'), '_');
@@ -406,9 +573,11 @@ class ExportManager {
 
 /// Entrada para un archivo a incluir en el ZIP.
 class _ExportFileEntry {
-  final String sourcePath;
+  /// Mutable: se reemplaza por la copia aplanada al incluir anotaciones.
+  String sourcePath;
   final String zipEntryName;
-  _ExportFileEntry(this.sourcePath, this.zipEntryName);
+  final String? docId;
+  _ExportFileEntry(this.sourcePath, this.zipEntryName, {this.docId});
 }
 
 /// Argumentos para el worker de compresión.

@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:async';
 import 'dart:isolate'; // Worker
 import 'package:archive/archive_io.dart';
+import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -292,6 +293,7 @@ class BackupManager {
         
         int docCount = 0;
         final totalDocs = extDocs.length;
+        final docIdMap = <String, String>{}; // id en backup -> id nuevo
 
         for (final d in extDocs) {
           docCount++;
@@ -322,6 +324,7 @@ class BackupManager {
              final destFile = File(p.join(docsDir.path, newFilename));
              
              await backupFile.copy(destFile.path);
+             docIdMap[d.id] = newDocId;
 
              String? newFolderId = rootImportId;
              if (d.folderId != null) {
@@ -342,6 +345,30 @@ class BackupManager {
           }
         }
         
+        // 7. Migrar anotaciones de los documentos importados
+        try {
+          final extStrokes = await externalDb.getAllAnnotationStrokes();
+          for (final s in extStrokes) {
+            final newDocId = docIdMap[s.docId];
+            if (newDocId == null) continue;
+            await AppData.db.insertAnnotationStroke(
+              AnnotationStrokesTableCompanion.insert(
+                id: AppData.newId(prefix: 'stk'),
+                docId: newDocId,
+                // Las capas por setlist no se migran (los setlists no se importan)
+                setlistId: const Value(null),
+                pageIndex: s.pageIndex,
+                tool: s.tool,
+                width: s.width,
+                pointsJson: s.pointsJson,
+                createdAt: s.createdAt,
+              ),
+            );
+          }
+        } catch (e) {
+          debugPrint("Warning: no se pudieron migrar anotaciones del backup: $e");
+        }
+
         await AppData.refreshLibrary();
         debugPrint("Importación finalizada con éxito.");
 
@@ -371,7 +398,12 @@ class BackupManager {
   }
 
   /// Exporta la biblioteca como un ZIP legible para PC.
-  Future<void> exportLibraryToZip(BuildContext context) async {
+  ///
+  /// Si [includeAnnotations] es 	rue, los PDFs con anotaciones se exportan
+  /// con las anotaciones aplicadas (copias temporales; los originales no se
+  /// modifican).
+  Future<void> exportLibraryToZip(BuildContext context, {bool includeAnnotations = false}) async {
+    Directory? workDir;
     try {
       // 1. Preparar destino
       final timestamp = DateFormat('yyyyMMdd_HHmm').format(DateTime.now());
@@ -396,6 +428,9 @@ class BackupManager {
         return parentPath.isEmpty ? safeName : '$parentPath/$safeName';
       }
 
+      final usedZipPaths = <String>{};
+      final docIdByEntry = <_BackupFileEntry, String>{};
+
       for (final score in AppData.library) {
         if (score.filePath == null) continue;
         final file = File(score.filePath!);
@@ -404,13 +439,37 @@ class BackupManager {
         final folderPath = getFolderPath(score.folderId);
         final safeTitle = _sanitizeFilename(score.title);
         
-        var filename = safeTitle;
-        if (!filename.toLowerCase().endsWith('.pdf')) {
-           filename += '.pdf';
+        var baseName = safeTitle;
+        if (baseName.toLowerCase().endsWith('.pdf')) {
+           baseName = baseName.substring(0, baseName.length - 4);
         }
-        final zipPath = folderPath.isEmpty ? filename : '$folderPath/$filename';
+        String buildPath(String name) =>
+            folderPath.isEmpty ? '$name.pdf' : '$folderPath/$name.pdf';
+
+        // Evitar entradas duplicadas en el ZIP (mismo título en la misma carpeta)
+        var zipPath = buildPath(baseName);
+        var n = 2;
+        while (!usedZipPaths.add(zipPath.toLowerCase())) {
+          zipPath = buildPath('$baseName ($n)');
+          n++;
+        }
         
-        filesToZip.add(_BackupFileEntry(score.filePath!, zipPath));
+        final entry = _BackupFileEntry(score.filePath!, zipPath);
+        filesToZip.add(entry);
+        docIdByEntry[entry] = score.docId;
+      }
+
+      // 2b. Aplicar anotaciones (copias temporales aplanadas)
+      if (includeAnnotations) {
+        workDir = await ExportManager.instance.createExportWorkDir();
+        final flattened = await ExportManager.instance.flattenAnnotatedDocs(
+          { for (final e in filesToZip) docIdByEntry[e]!: e.sourcePath },
+          workDir,
+        );
+        for (final e in filesToZip) {
+          final f = flattened[docIdByEntry[e]];
+          if (f != null) e.sourcePath = f;
+        }
       }
 
       // 3. Iniciar Worker
@@ -438,6 +497,7 @@ class BackupManager {
       }
 
       AppData.backgroundTaskProgress.value = null;
+      await ExportManager.instance.deleteDirQuietly(workDir);
 
       // 5. Share
       await Share.shareXFiles([XFile(zipFilePath)], text: 'Exportación de Biblioteca Atril');
@@ -448,6 +508,8 @@ class BackupManager {
       if (context.mounted) {
          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
       }
+    } finally {
+      await ExportManager.instance.deleteDirQuietly(workDir);
     }
   }
 
@@ -459,7 +521,8 @@ class BackupManager {
 // --- ISOLATE WORKER HELPERS ---
 
 class _BackupFileEntry {
-  final String sourcePath;
+  /// Mutable: se reemplaza por la copia aplanada al incluir anotaciones.
+  String sourcePath;
   final String zipPath;
   _BackupFileEntry(this.sourcePath, this.zipPath);
 }

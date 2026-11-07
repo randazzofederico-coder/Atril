@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../data/app_data.dart';
 import '../../models/setlist.dart';
+import '../library/export_actions.dart';
 import 'setlist_detail_screen.dart';
 
 class SetlistsScreen extends StatelessWidget {
@@ -72,22 +73,10 @@ class SetlistsScreen extends StatelessWidget {
                       _confirmDeleteSetlist(context, setlist);
                     }
                     if (v == 'share_zip') {
-                      AppData.shareSetlist(setlist, format: SetlistExportFormat.zip).catchError((e) {
-                        if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('Error: $e')),
-                          );
-                        }
-                      });
+                      ExportActions.shareSetlist(context, setlist, SetlistExportFormat.zip);
                     }
                     if (v == 'share_setlist') {
-                      AppData.shareSetlist(setlist, format: SetlistExportFormat.setlist).catchError((e) {
-                        if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('Error: $e')),
-                          );
-                        }
-                      });
+                      ExportActions.shareSetlist(context, setlist, SetlistExportFormat.setlist);
                     }
                   },
                   itemBuilder: (context) => const [
