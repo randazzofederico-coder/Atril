@@ -154,12 +154,12 @@ La base de datos (`AppDatabase`) define la estructura core:
 ---
 
 ### 🛡️ Garantías de integridad (v1.18.0)
-* **Restore destructivo seguro:** valida el .atril (PRAGMA integrity_check + lectura con el esquema actual) antes de tocar nada; resguarda DB y docs/ como *.restore_bak; si algo falla vuelve a la biblioteca anterior; la DB siempre queda abierta.
-* **Backup consistente:** VACUUM INTO en lugar de copiar el SQLite en caliente.
-* **Importaciones transaccionales** (backup merge y .setlist): se copian los PDFs, se escribe todo en una transacción y, si falla, se borran los PDFs copiados.
-* **Zip-slip / rutas:** los workers de descompresión, data.json y MainActivity no permiten escribir fuera del destino.
+* **Restore destructivo seguro:** valida el `.atril` (`PRAGMA integrity_check` + lectura con el esquema actual) antes de tocar nada; resguarda DB y `docs/` como `*.restore_bak`; si algo falla vuelve a la biblioteca anterior; la DB siempre queda abierta.
+* **Backup consistente:** `VACUUM INTO` en lugar de copiar el SQLite en caliente.
+* **Importaciones transaccionales** (backup merge y `.setlist`): se copian los PDFs, se escribe todo en una transacción y, si falla, se borran los PDFs copiados.
+* **Zip-slip / rutas:** los workers de descompresión, `data.json` y `MainActivity` no permiten escribir fuera del destino.
 * **Anotaciones:** historial de deshacer por documento (se reinicia al cambiar de doc o editar páginas); "borrar página" deshacible; deshacer una edición de páginas reubica las anotaciones hechas después (solo se pierden las de páginas agregadas por esa edición, con aviso).
-* **Memoria/DB consistentes:** efreshLibrary atómico y serializado; los setlists persisten antes de tocar la memoria.
+* **Memoria/DB consistentes:** `refreshLibrary` atómico y serializado; los setlists persisten antes de tocar la memoria.
 * **Arranque robusto:** la auto-limpieza de papelera y de temporales no puede impedir que la app arranque.
 * **Migración v5:** purga anotaciones huérfanas + índices; la migración v1→v4 ya no falla por columnas duplicadas.
 * **Tests:** 44 (papelera, backup/restore e importaciones de punta a punta con isolates reales, migraciones, anotaciones, setlists).
