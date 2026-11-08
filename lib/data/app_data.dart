@@ -111,63 +111,87 @@ class AppData {
     }
   }
 
-  static Future<void> refreshLibrary() async {
-    await _hydrateAll();
+  /// Recarga todo desde la DB. Las recargas se serializan: si se piden varias
+  /// a la vez (p. ej. un import en segundo plano y un borrado), corren una
+  /// detrás de otra en lugar de pisarse.
+  static Future<void> _refreshChain = Future<void>.value();
+
+  static Future<void> refreshLibrary() {
+    final next = _refreshChain.then((_) => _hydrateAll());
+    _refreshChain = next.catchError((Object e) => debugPrint('refreshLibrary falló: $e'));
+    return next;
   }
 
   /// Carga todo desde la DB a la memoria RAM.
+  ///
+  /// Primero lee todo y recién después reemplaza las listas en memoria de una
+  /// sola vez, para que la UI nunca vea listas vacías o a medio cargar.
   static Future<void> _hydrateAll() async {
-    // 1. Folders
     final dbFolders = await db.getAllFolders();
-    folders.clear();
-    _foldersById.clear();
+    final docs = await db.getAllDocs();
+    final sls = await db.getAllSetlists();
+    final allItems = await db.getAllSetlistItemsOrdered();
+
+    // 1. Folders
+    final newFolders = <Folder>[];
     for (final f in dbFolders) {
       if (f.id == 'root') continue;
       if (f.isDeleted) continue; // Skip deleted
-      final folder = Folder(
+      newFolders.add(Folder(
         id: f.id,
         name: f.name,
         parentId: f.parentId,
         position: f.position,
-      );
-      folders.add(folder);
-      _foldersById[folder.id] = folder;
+      ));
     }
 
     // 2. Docs
-    final docs = await db.getAllDocs();
-    library.clear();
-    _scoresById.clear();
-
+    final newLibrary = <Score>[];
     for (final d in docs) {
       if (d.isDeleted) continue; // Skip deleted
-      final absPath = storage.absPathFromRelPath(d.internalRelPath);
-      final score = Score(
+      newLibrary.add(Score(
         docId: d.id,
         title: d.displayName,
         author: d.author ?? '',
-        filePath: absPath,
+        filePath: storage.absPathFromRelPath(d.internalRelPath),
         folderId: d.folderId ?? 'root',
-      );
-      library.add(score);
-      _scoresById[score.docId] = score;
+      ));
     }
 
-    // 3. Setlists
-    final sls = await db.getAllSetlists();
-    setlists.clear();
-    _setlistsById.clear();
-
-    for (final s in sls) {
-      final items = await db.getItemsForSetlist(s.id);
-      final docIds = items
-          .map((e) => e.docId)
-          .where((id) => id.isNotEmpty)
-          .toList(growable: true);
-      final setlist = Setlist(setlistId: s.id, name: s.name, docIds: docIds);
-      setlists.add(setlist);
-      _setlistsById[setlist.setlistId] = setlist;
+    // 3. Setlists (items agrupados en memoria, sin una consulta por setlist)
+    final itemsBySetlist = <String, List<String>>{};
+    for (final it in allItems) {
+      if (it.docId.isEmpty) continue;
+      itemsBySetlist.putIfAbsent(it.setlistId, () => <String>[]).add(it.docId);
     }
+    final newSetlists = <Setlist>[
+      for (final s in sls)
+        Setlist(
+          setlistId: s.id,
+          name: s.name,
+          docIds: List<String>.of(itemsBySetlist[s.id] ?? const <String>[], growable: true),
+        ),
+    ];
+
+    // Swap atómico (sin awaits en el medio)
+    folders
+      ..clear()
+      ..addAll(newFolders);
+    _foldersById
+      ..clear()
+      ..addEntries(newFolders.map((f) => MapEntry(f.id, f)));
+    library
+      ..clear()
+      ..addAll(newLibrary);
+    _scoresById
+      ..clear()
+      ..addEntries(newLibrary.map((s) => MapEntry(s.docId, s)));
+    setlists
+      ..clear()
+      ..addAll(newSetlists);
+    _setlistsById
+      ..clear()
+      ..addEntries(newSetlists.map((s) => MapEntry(s.setlistId, s)));
 
     // 4. Doc States (Page Persistence)
     await LibraryRepository.hydrateDocStates();
@@ -435,18 +459,27 @@ class AppData {
   }
   
   static Future<void> addDocsToSetlist(String setlistId, List<String> newIds) async { 
-    await SetlistRepository.addDocsToSetlist(setlistId, newIds); 
-    _notifySetlists();
+    try {
+      await SetlistRepository.addDocsToSetlist(setlistId, newIds);
+    } finally {
+      _notifySetlists();
+    }
   }
   
   static Future<void> reorderDocInSetlist(String setlistId, int oldIdx, int newIdx) async { 
-    await SetlistRepository.reorderDocInSetlist(setlistId, oldIdx, newIdx); 
-    _notifySetlists();
+    try {
+      await SetlistRepository.reorderDocInSetlist(setlistId, oldIdx, newIdx);
+    } finally {
+      _notifySetlists(); // también si falló: la memoria se revirtió
+    }
   }
   
   static Future<void> removeDocFromSetlist(String setlistId, String docId) async { 
-    await SetlistRepository.removeDocFromSetlist(setlistId, docId); 
-    _notifySetlists();
+    try {
+      await SetlistRepository.removeDocFromSetlist(setlistId, docId);
+    } finally {
+      _notifySetlists();
+    }
   }
 
   // --- EXPORT / SHARE ---

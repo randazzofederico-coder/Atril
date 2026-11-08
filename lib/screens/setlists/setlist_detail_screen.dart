@@ -24,6 +24,16 @@ class SetlistDetailScreen extends StatefulWidget {
 class _SetlistDetailScreenState extends State<SetlistDetailScreen> {
   bool _isEditing = false;
 
+  /// Ejecuta una operación de setlist y muestra el error si falla.
+  void _guard(Future<void> op) {
+    final messenger = ScaffoldMessenger.of(context);
+    op.catchError((Object e) {
+      messenger.showSnackBar(
+        SnackBar(content: Text('No se pudo guardar el cambio: $e'), backgroundColor: Colors.red),
+      );
+    });
+  }
+
   Setlist? _setlistOrNull() => AppData.getSetlistById(widget.setlistId);
 
   // --- LÓGICA DE NEGOCIO ---
@@ -52,7 +62,7 @@ class _SetlistDetailScreenState extends State<SetlistDetailScreen> {
 
     if (!mounted) return;
     if (ok == true) {
-      AppData.deleteSetlist(setlist.setlistId);
+      _guard(AppData.deleteSetlist(setlist.setlistId));
       nav.pop();
     }
   }
@@ -70,7 +80,7 @@ class _SetlistDetailScreenState extends State<SetlistDetailScreen> {
     if (!mounted) return;
     if (picked == null || picked.isEmpty) return;
 
-    AppData.addDocsToSetlist(setlist.setlistId, picked);
+    _guard(AppData.addDocsToSetlist(setlist.setlistId, picked));
   }
 
   Future<void> _addFromCamera(Setlist setlist) async {
@@ -82,7 +92,7 @@ class _SetlistDetailScreenState extends State<SetlistDetailScreen> {
     if (!mounted) return;
     if (docId == null) return;
 
-    AppData.addDocsToSetlist(setlist.setlistId, [docId]);
+    _guard(AppData.addDocsToSetlist(setlist.setlistId, [docId]));
   }
 
   Future<void> _removeDoc(Setlist setlist, Score score) async {
@@ -107,7 +117,7 @@ class _SetlistDetailScreenState extends State<SetlistDetailScreen> {
     );
     if (!mounted) return;
     if (ok == true) {
-      AppData.removeDocFromSetlist(setlist.setlistId, score.docId);
+      _guard(AppData.removeDocFromSetlist(setlist.setlistId, score.docId));
     }
   }
 
@@ -235,7 +245,7 @@ class _SetlistDetailScreenState extends State<SetlistDetailScreen> {
                       padding: listPadding,
                       itemCount: scores.length,
                       onReorder: (oldIndex, newIndex) {
-                        AppData.reorderDocInSetlist(setlist.setlistId, oldIndex, newIndex);
+                        _guard(AppData.reorderDocInSetlist(setlist.setlistId, oldIndex, newIndex));
                       },
                       itemBuilder: (context, index) {
                         final score = scores[index];

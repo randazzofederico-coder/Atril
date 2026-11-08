@@ -399,6 +399,8 @@ class AppDatabase extends _$AppDatabase {
   Future<void> deleteSetlistById(String setlistId) async {
     await transaction(() async {
       await (delete(setlistItemsTable)..where((t) => t.setlistId.equals(setlistId))).go();
+      // Capas de anotación legacy de ese setlist (ya no se usan)
+      await (delete(annotationStrokesTable)..where((t) => t.setlistId.equals(setlistId))).go();
       await (delete(setlistsTable)..where((t) => t.id.equals(setlistId))).go();
     });
   }
@@ -406,6 +408,16 @@ class AppDatabase extends _$AppDatabase {
   // ---------------------------------------------------------------------------
   // Setlist items
   // ---------------------------------------------------------------------------
+
+  /// Todos los items de todos los setlists, ordenados (una sola consulta).
+  Future<List<SetlistItemsTableData>> getAllSetlistItemsOrdered() {
+    return (select(setlistItemsTable)
+          ..orderBy([
+            (t) => OrderingTerm.asc(t.setlistId),
+            (t) => OrderingTerm.asc(t.position),
+          ]))
+        .get();
+  }
 
   Future<List<SetlistItemsTableData>> getItemsForSetlist(String setlistId) {
     return (select(setlistItemsTable)

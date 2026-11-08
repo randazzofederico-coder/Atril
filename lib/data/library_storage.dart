@@ -21,7 +21,9 @@ class LibraryStorage {
   }
 
   /// Initializes (and creates if needed) the internal folders.
+  /// Idempotente: si ya está inicializado no vuelve a resolver rutas.
   Future<void> init() async {
+    if (_baseDir != null && _docsDir != null) return;
     final appDir = await getApplicationDocumentsDirectory();
     final base = Directory(p.join(appDir.path, 'atril'));
     final docs = Directory(p.join(base.path, 'docs'));
@@ -37,6 +39,13 @@ class LibraryStorage {
     _docsDir = docs;
   }
   
+  /// Inicializa con un directorio base arbitrario (tests).
+  @visibleForTesting
+  void initForTesting(Directory base) {
+    _baseDir = base;
+    _docsDir = Directory(p.join(base.path, 'docs'))..createSync(recursive: true);
+  }
+
   // Public getter so BackupManager can access it
   Future<Directory> getDocsDir() async {
       await init(); // Ensure initialized
