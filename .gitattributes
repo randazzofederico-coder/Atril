@@ -20,3 +20,9 @@
 *.keystore binary
 *.atril binary
 *.sqlite binary
+
+# Archivos generados por Flutter (los escribe con LF): evita cambios fantasma
+linux/flutter/** text eol=lf
+macos/Flutter/** text eol=lf
+windows/flutter/** text eol=lf
+
