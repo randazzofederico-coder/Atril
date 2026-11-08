@@ -1,12 +1,10 @@
 import 'dart:io';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../data/app_data.dart';
 import '../../data/repositories/pdf_generator.dart';
-import '../../data/repositories/import_repository.dart';
 import 'image_edit_screen.dart';
 
 /// Screen that allows the user to capture photos and compose them into a PDF.
@@ -29,21 +27,23 @@ class _PageEntry {
   ImageEditParams params;
   bool isProcessing;
   /// Processing progress (0.0 to 1.0). Updated from the background Isolate.
-  double progress;
+  double progress = 0.0;
+
+  /// Se incrementa en cada procesamiento: si la página se re-edita mientras
+  /// un procesamiento anterior sigue corriendo, el resultado viejo se descarta.
+  int generation = 0;
 
   _PageEntry({
     required this.originalPath,
     required this.editedPath,
     required this.params,
     this.isProcessing = false,
-    this.progress = 0.0,
   });
 }
 
 class _PhotoScannerScreenState extends State<PhotoScannerScreen> {
   final ImagePicker _picker = ImagePicker();
   final List<_PageEntry> _pages = [];
-  bool _isGenerating = false;
 
   /// Number of pages currently being processed in background.
   int get _processingCount => _pages.where((p) => p.isProcessing).length;
@@ -107,39 +107,47 @@ class _PhotoScannerScreenState extends State<PhotoScannerScreen> {
     setState(() => _pages.add(page));
 
     if (result.needsBackgroundProcessing) {
-      _processPageInBackground(_pages.length - 1, result);
+      _processPageInBackground(page, result);
     }
   }
 
   /// Runs the deferred perspective warp in a background Isolate with progress.
-  Future<void> _processPageInBackground(int index, ImageEditResult result) async {
+  ///
+  /// Trabaja sobre la PÁGINA (no sobre un índice): reordenar o borrar páginas
+  /// mientras se procesa no puede asignar la imagen a otra página.
+  Future<void> _processPageInBackground(_PageEntry page, ImageEditResult result) async {
+    final gen = ++page.generation;
+    bool stillCurrent() => mounted && page.generation == gen;
     try {
       final finalPath = await result.backgroundProcessor!(
         (progress) {
-          // Update progress from the background processor
-          if (mounted && index < _pages.length) {
-            setState(() => _pages[index].progress = progress);
-          }
+          if (stillCurrent()) setState(() => page.progress = progress);
         },
       );
-      if (mounted && index < _pages.length) {
+      if (stillCurrent()) {
         setState(() {
-          _pages[index].editedPath = finalPath;
-          _pages[index].isProcessing = false;
-          _pages[index].progress = 1.0;
+          page.editedPath = finalPath;
+          page.isProcessing = false;
+          page.progress = 1.0;
         });
       }
     } catch (e) {
-      debugPrint('Background processing error for page $index: $e');
-      if (mounted && index < _pages.length) {
+      debugPrint('Background processing error: $e');
+      if (mounted && stillCurrent()) {
+        final pageNumber = _pages.indexOf(page) + 1;
         // Fallback: use the original image path
         setState(() {
-          _pages[index].editedPath = _pages[index].originalPath;
-          _pages[index].isProcessing = false;
-          _pages[index].progress = 0.0;
+          page.editedPath = page.originalPath;
+          page.isProcessing = false;
+          page.progress = 0.0;
         });
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error procesando página ${index + 1}'), backgroundColor: Colors.orange),
+          SnackBar(
+            content: Text(pageNumber > 0
+                ? 'Error procesando página $pageNumber (se usa la foto original)'
+                : 'Error procesando una página'),
+            backgroundColor: Colors.orange,
+          ),
         );
       }
     }
@@ -172,7 +180,7 @@ class _PhotoScannerScreenState extends State<PhotoScannerScreen> {
         _pages[index].progress = 0.0;
       });
       if (result.needsBackgroundProcessing) {
-        _processPageInBackground(index, result);
+        _processPageInBackground(page, result);
       }
     }
   }
@@ -336,6 +344,33 @@ class _PhotoScannerScreenState extends State<PhotoScannerScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Con páginas sin guardar, salir pide confirmación (antes se perdían).
+    return PopScope(
+      canPop: _pages.isEmpty,
+      onPopInvokedWithResult: (didPop, _) async {
+        if (didPop) return;
+        final discard = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('¿Descartar el escaneo?'),
+            content: Text('Se van a perder ${_pages.length} página(s) sin guardar.'),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Seguir')),
+              FilledButton(
+                style: FilledButton.styleFrom(backgroundColor: Colors.red),
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Descartar'),
+              ),
+            ],
+          ),
+        );
+        if (discard == true && context.mounted) Navigator.of(context).pop();
+      },
+      child: _buildScaffold(context),
+    );
+  }
+
+  Widget _buildScaffold(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Nueva Partitura desde Foto'),

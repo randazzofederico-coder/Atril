@@ -4,7 +4,6 @@ import 'dart:isolate';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:image/image.dart' as img;
 
@@ -345,12 +344,17 @@ class _ImageEditScreenState extends State<ImageEditScreen> {
     final receivePort = ReceivePort();
     final completer = Completer<String>();
 
+    // onError/onExit: si el isolate muere (p. ej. sin memoria con fotos muy
+    // grandes) el future termina con error en lugar de quedar colgado.
     await Isolate.spawn(
       _processPerspectiveWithProgress,
       _IsolateMessage(isolateParams, receivePort.sendPort),
+      onError: receivePort.sendPort,
+      onExit: receivePort.sendPort,
     );
 
     receivePort.listen((message) {
+      if (completer.isCompleted) return;
       if (message is double) {
         // Progress update (0.0 – 1.0)
         onProgress(message);
@@ -358,8 +362,15 @@ class _ImageEditScreenState extends State<ImageEditScreen> {
         // Final result path
         completer.complete(message);
         receivePort.close();
-      } else if (message is List && message.first == 'error') {
-        completer.completeError(Exception(message.last));
+      } else if (message is List) {
+        // ['error', msg] propio, o [error, stack] de onError
+        completer.completeError(Exception(message.length > 1 && message.first == 'error'
+            ? message.last
+            : message.first));
+        receivePort.close();
+      } else if (message == null) {
+        // onExit sin resultado
+        completer.completeError(Exception('El procesamiento de la imagen terminó inesperadamente.'));
         receivePort.close();
       }
     });
