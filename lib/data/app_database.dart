@@ -111,13 +111,14 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase({QueryExecutor? executor, File? customFile}) : super(executor ?? _openConnection(customFile));
 
   @override
-  int get schemaVersion => 4; 
+  int get schemaVersion => 5; 
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
         onCreate: (Migrator m) async {
           await m.createAll();
           await _ensureRootFolderExists();
+          await _createIndexes();
         },
         onUpgrade: (Migrator m, int from, int to) async {
           if (from < 2) {
@@ -129,16 +130,43 @@ class AppDatabase extends _$AppDatabase {
              await m.createTable(annotationStrokesTable);
            }
            if (from < 4) {
-             await m.addColumn(docsTable, docsTable.isDeleted);
-             await m.addColumn(docsTable, docsTable.deletedAt);
-             await m.addColumn(foldersTable, foldersTable.isDeleted);
-             await m.addColumn(foldersTable, foldersTable.deletedAt);
+             // createTable (v1→v2) ya crea folders con estas columnas: solo
+             // agregamos las que falten para no romper con "duplicate column".
+             await _addColumnIfMissing(m, docsTable, docsTable.isDeleted);
+             await _addColumnIfMissing(m, docsTable, docsTable.deletedAt);
+             await _addColumnIfMissing(m, foldersTable, foldersTable.isDeleted);
+             await _addColumnIfMissing(m, foldersTable, foldersTable.deletedAt);
+           }
+           if (from < 5) {
+             // Anotaciones huérfanas de documentos ya purgados (antes la purga
+             // no las borraba) + índices para las consultas frecuentes.
+             await customStatement(
+               'DELETE FROM annotation_strokes_table '
+               'WHERE doc_id NOT IN (SELECT id FROM docs_table)',
+             );
+             await _createIndexes();
            }
         },
         beforeOpen: (details) async {
           await customStatement('PRAGMA foreign_keys = ON');
         },
       );
+
+  Future<void> _createIndexes() async {
+    await customStatement(
+      'CREATE INDEX IF NOT EXISTS idx_strokes_doc_page '
+      'ON annotation_strokes_table (doc_id, page_index)',
+    );
+    await customStatement(
+      'CREATE INDEX IF NOT EXISTS idx_setlist_items_doc ON setlist_items_table (doc_id)',
+    );
+  }
+
+  Future<void> _addColumnIfMissing(Migrator m, TableInfo table, GeneratedColumn column) async {
+    final cols = await customSelect('PRAGMA table_info(${table.actualTableName})').get();
+    final exists = cols.any((r) => r.data['name'] == column.name);
+    if (!exists) await m.addColumn(table, column);
+  }
 
   // Se eliminó _createAnnotationsTableIfNeeded porque ahora es una tabla nativa de Drift.
 
@@ -221,6 +249,17 @@ class AppDatabase extends _$AppDatabase {
     await (update(docsTable)..where((t) => t.id.equals(docId))).write(
       DocsTableCompanion(
         folderId: Value(folderId),
+        updatedAt: Value(DateTime.now().millisecondsSinceEpoch),
+      ),
+    );
+  }
+
+  /// Cambia solo título y autor de un doc.
+  Future<void> updateDocMetadata(String docId, {required String displayName, required String author}) async {
+    await (update(docsTable)..where((t) => t.id.equals(docId))).write(
+      DocsTableCompanion(
+        displayName: Value(displayName),
+        author: Value(author),
         updatedAt: Value(DateTime.now().millisecondsSinceEpoch),
       ),
     );
@@ -317,6 +356,16 @@ class AppDatabase extends _$AppDatabase {
     await (update(foldersTable)..where((t) => t.id.equals(folderId))).write(
       FoldersTableCompanion(
         parentId: Value(parentId),
+        updatedAt: Value(DateTime.now().millisecondsSinceEpoch),
+      ),
+    );
+  }
+
+  /// Cambia solo el nombre de una carpeta.
+  Future<void> renameFolderRow(String folderId, String name) async {
+    await (update(foldersTable)..where((t) => t.id.equals(folderId))).write(
+      FoldersTableCompanion(
+        name: Value(name),
         updatedAt: Value(DateTime.now().millisecondsSinceEpoch),
       ),
     );

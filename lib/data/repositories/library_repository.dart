@@ -70,13 +70,8 @@ class LibraryRepository {
     final f = AppData.getFolderById(folderId);
     if (f == null) return null;
 
-    // DB Update
-    await AppData.db.upsertFolder(
-      id: f.id,
-      name: newName,
-      parentId: f.parentId,
-      position: f.position,
-    );
+    // DB Update (solo el nombre: no toca padre, fechas ni estado de papelera)
+    await AppData.db.renameFolderRow(f.id, newName);
 
     // Return updated object
     return Folder(
@@ -99,16 +94,8 @@ class LibraryRepository {
     final s = AppData.getScoreById(docId);
     if (s == null) return null;
     
-    final relPath = AppData.storage.docRelPath(s.docId);
-    
-    // DB Update
-    await AppData.db.upsertDoc(
-      id: s.docId,
-      displayName: newTitle, 
-      author: newAuthor,    
-      internalRelPath: relPath,
-      folderId: s.folderId,
-    );
+    // DB Update (solo título/autor: no toca ruta, fechas ni estado de papelera)
+    await AppData.db.updateDocMetadata(s.docId, displayName: newTitle, author: newAuthor);
 
     return Score(
       docId: s.docId,
@@ -120,7 +107,9 @@ class LibraryRepository {
   }
 
   static Future<Score?> renameScore(String docId, String newTitle) async {
-    return updateScoreMetadata(docId: docId, newTitle: newTitle, newAuthor: '');
+    // Conserva el autor (antes se borraba al renombrar).
+    final s = AppData.getScoreById(docId);
+    return updateScoreMetadata(docId: docId, newTitle: newTitle, newAuthor: s?.author ?? '');
   }
 
   static String uniqueTitle(String desiredTitle) {
@@ -147,32 +136,23 @@ class LibraryRepository {
     required List<String> folderIds,
     required String targetParentId,
   }) async {
-    // 1. Mover Docs
-    for (final docId in docIds) {
-      final doc = AppData.getScoreById(docId);
-      if (doc != null) {
-        await AppData.db.upsertDoc(
-          id: doc.docId,
-          displayName: doc.title,
-          author: doc.author,
-          internalRelPath: AppData.storage.docRelPath(doc.docId),
-          folderId: targetParentId,
-        );
+    // Solo se actualiza la ubicación (no se reescriben otras columnas), todo
+    // en una transacción.
+    await AppData.db.transaction(() async {
+      // 1. Mover Docs
+      for (final docId in docIds) {
+        if (AppData.getScoreById(docId) != null) {
+          await AppData.db.setDocFolder(docId, targetParentId);
+        }
       }
-    }
-    // 2. Mover Folders
-    for (final folderId in folderIds) {
-      if (folderId == targetParentId) continue;
-      final f = AppData.getFolderById(folderId);
-      if (f != null) {
-        await AppData.db.upsertFolder(
-          id: f.id,
-          name: f.name,
-          position: f.position,
-          parentId: targetParentId == 'root' ? null : targetParentId,
-        );
+      // 2. Mover Folders
+      for (final folderId in folderIds) {
+        if (folderId == targetParentId || folderId == 'root') continue;
+        if (AppData.getFolderById(folderId) != null) {
+          await AppData.db.setFolderParent(folderId, targetParentId == 'root' ? null : targetParentId);
+        }
       }
-    }
+    });
     // NOTA: El llamador es responsable de actualizar el estado local (AppData) o refrescar.
   }
 
