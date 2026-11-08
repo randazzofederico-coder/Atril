@@ -268,6 +268,11 @@ class _SetlistDetailScreenState extends State<SetlistDetailScreen> {
                       child: _ViewScoreTile(
                         index: index,
                         sourceScores: scores,
+                        onPlayLive: () => Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => LiveSetlistScreen(setlist: setlist, initialIndex: index),
+                          ),
+                        ),
                       ),
                     );
                   },
@@ -313,7 +318,11 @@ class _ViewScoreTile extends StatelessWidget {
   final int index;
   final List<Score> sourceScores;
 
+  /// Botón ▶: arrancar el modo Vivo desde este tema.
+  final VoidCallback? onPlayLive;
+
   const _ViewScoreTile({
+    this.onPlayLive,
     required this.index,
     required this.sourceScores,
   });
@@ -331,7 +340,13 @@ class _ViewScoreTile extends StatelessWidget {
         ),
         title: Text(score.title),
         subtitle: Text(hasPdf ? 'PDF' : score.author),
-        trailing: hasPdf ? const Icon(Icons.picture_as_pdf, size: 20, color: Colors.grey) : null,
+        trailing: hasPdf && onPlayLive != null
+            ? IconButton(
+                tooltip: 'Modo Vivo desde este tema',
+                icon: const Icon(Icons.play_circle_outline),
+                onPressed: onPlayLive,
+              )
+            : null,
         onTap: !hasPdf
             ? null
             : () {

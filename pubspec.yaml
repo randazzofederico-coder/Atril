@@ -30,8 +30,6 @@ dependencies:
 
   # PDF (Versiones Modernas)
   syncfusion_flutter_pdf: ^32.1.24
-  # ACTUALIZADO: Saltamos de la v24 a la v32 para arreglar el error de compilación
-  syncfusion_flutter_pdfviewer: ^32.1.24
   
   # Base de datos
   drift: ^2.16.0
