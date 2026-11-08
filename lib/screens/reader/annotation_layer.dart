@@ -114,6 +114,14 @@ class AnnotationLayer extends StatefulWidget {
   /// If true, the layer will ignore pointer events (display-only).
   final bool ignorePointers;
 
+  /// Tamaño de la página en puntos PDF (sin zoom).
+  ///
+  /// pdfrx dibuja los overlays en coordenadas de pantalla (el canvas crece
+  /// con el zoom). Con este dato el painter escala grosores, texto y sellos
+  /// junto con la página, de modo que el trazo "pertenece" al papel.
+  /// Si es null, se dibuja sin escalar (1 unidad = 1 px lógico).
+  final Size? pageSize;
+
   const AnnotationLayer({
     super.key,
     this.controller,
@@ -125,6 +133,7 @@ class AnnotationLayer extends StatefulWidget {
     required this.color,
     this.setlistId,
     this.ignorePointers = false,
+    this.pageSize,
   });
 
   @override
@@ -236,6 +245,7 @@ class _AnnotationLayerState extends State<AnnotationLayer> {
             draftTool: widget.tool,
             draftWidth: widget.width,
             draftColor: widget.color,
+            pageSize: widget.pageSize,
           ),
           size: Size.infinite,
         );
@@ -382,6 +392,7 @@ class _AnnotationPainter extends CustomPainter {
   final AnnotationTool? draftTool;
   final double? draftWidth;
   final Color? draftColor;
+  final Size? pageSize;
 
   _AnnotationPainter({
     required this.strokes,
@@ -389,11 +400,20 @@ class _AnnotationPainter extends CustomPainter {
     this.draftTool,
     this.draftWidth,
     this.draftColor,
+    this.pageSize,
   });
 
   @override
-  void paint(Canvas canvas, Size size) {
-    // No manual transform needed - handled by parent InteractiveViewer
+  void paint(Canvas canvas, Size screenSize) {
+    // Pintamos en unidades de página (puntos PDF) y escalamos el canvas al
+    // tamaño en pantalla: así grosor, texto y sellos acompañan al zoom.
+    final ref = pageSize;
+    final hasRef = ref != null && ref.width > 0 && ref.height > 0;
+    final scale = hasRef ? screenSize.width / ref.width : 1.0;
+    final size = hasRef ? ref : screenSize;
+
+    canvas.save();
+    canvas.scale(scale);
     
     for (final s in strokes) {
       _paintItem(canvas, size, s);
@@ -408,6 +428,8 @@ class _AnnotationPainter extends CustomPainter {
 
        _paintStroke(canvas, size, tool, width, dp, color);
     }
+
+    canvas.restore();
   }
 
   void _paintItem(Canvas canvas, Size size, AnnotationStroke s) {
@@ -484,6 +506,7 @@ class _AnnotationPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _AnnotationPainter oldDelegate) {
     return oldDelegate.strokes != strokes || 
-           oldDelegate.draftPoints != draftPoints;
+           oldDelegate.draftPoints != draftPoints ||
+           oldDelegate.pageSize != pageSize;
   }
 }

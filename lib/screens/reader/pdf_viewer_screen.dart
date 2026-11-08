@@ -301,6 +301,8 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
                             width: _width,
                             color: _color,
                             ignorePointers: !_editMode, // Pass-through gestures if not editing
+                            // Tamaño en puntos (sin zoom) para escalar trazos con el zoom
+                            pageSize: Size(page.width, page.height),
                           )
                         ];
                      },
