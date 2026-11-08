@@ -608,13 +608,30 @@ class _PdfPageEditorScreenState extends State<PdfPageEditorScreen> {
   }
 
   /// Deshace la última edición guardada (PDF + anotaciones).
+  ///
+  /// Si deshacer perdería anotaciones hechas después (en páginas que la
+  /// edición agregó) y no se confirmó explícitamente ([confirmedLoss]), no
+  /// hace nada y avisa.
   static Future<void> _undoSavedEdit({
     required String docId,
     required String pdfPath,
     required String title,
     required ScaffoldMessengerState messenger,
+    bool confirmedLoss = false,
   }) async {
     try {
+      if (!confirmedLoss) {
+        final lost = await PageEditRepository.undoWouldLoseAnnotations(docId);
+        if (lost > 0) {
+          messenger.showSnackBar(SnackBar(
+            content: Text(
+              'No se deshizo: hay $lost anotación(es) nuevas en páginas agregadas. '
+              'Abrí "Editar Páginas" para deshacer y confirmarlo.',
+            ),
+          ));
+          return;
+        }
+      }
       await PageEditRepository.undoLastEdit(docId: docId, pdfPath: pdfPath);
       messenger.showSnackBar(
         SnackBar(content: Text('Se restauró la versión anterior de "$title"')),
@@ -629,6 +646,7 @@ class _PdfPageEditorScreenState extends State<PdfPageEditorScreen> {
   /// Botón "Restaurar versión anterior" (desde el propio editor).
   Future<void> _confirmUndoSaved() async {
     final ts = await PageEditRepository.undoTimestamp(widget.score.docId);
+    final lost = await PageEditRepository.undoWouldLoseAnnotations(widget.score.docId);
     if (!mounted) return;
     final when = ts == null
         ? ''
@@ -639,8 +657,10 @@ class _PdfPageEditorScreenState extends State<PdfPageEditorScreen> {
       builder: (ctx) => AlertDialog(
         title: const Text('¿Deshacer la última edición?'),
         content: Text(
-          'Se restauran las páginas y anotaciones tal como estaban antes de la '
-          'última edición guardada$when.',
+          'Se restauran las páginas tal como estaban antes de la última edición '
+          'guardada$when. Las anotaciones hechas después se conservan y vuelven '
+          'a su página original.'
+          '${lost > 0 ? '\n\n⚠️ $lost anotación(es) están en páginas que esa edición agregó y se perderán.' : ''}',
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
@@ -657,6 +677,7 @@ class _PdfPageEditorScreenState extends State<PdfPageEditorScreen> {
       pdfPath: widget.score.filePath!,
       title: widget.score.title,
       messenger: messenger,
+      confirmedLoss: true,
     );
   }
 

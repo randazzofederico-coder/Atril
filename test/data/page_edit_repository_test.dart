@@ -32,6 +32,58 @@ void main() {
     });
   });
 
+  group('mergeAnnotationsForUndo (deshacer edición sin perder anotaciones)', () {
+    AnnotationStrokesTableData row(String id, int page, {int createdAt = 1}) =>
+        AnnotationStrokesTableData(
+          id: id, docId: 'd1', pageIndex: page, tool: 'pen', width: 2,
+          pointsJson: '[]', createdAt: createdAt,
+        );
+
+    Map<String, int> pages(List<AnnotationStrokesTableData> rows) =>
+        {for (final r in rows) r.id: r.pageIndex};
+
+    // Edición: 3 páginas originales → [orig 2, nueva, orig 0]  (orig 1 eliminada)
+    // mapping viejo→nuevo: 3→1, 1→3   (página 2 eliminada, página 2 nueva = agregada)
+    const mapping = {3: 1, 1: 3};
+
+    test('vuelven las borradas por la edición y las previas a su página vieja', () {
+      final snapshot = [row('a', 1), row('b', 2), row('c', 3)];
+      final current = [row('a', 3), row('c', 1)]; // 'b' la borró la edición
+      final r = PageEditRepository.mergeAnnotationsForUndo(
+        snapshotRows: snapshot, currentRows: current, pageMapping: mapping,
+      );
+      expect(pages(r.rows), {'a': 1, 'b': 2, 'c': 3});
+      expect(r.lost, 0);
+    });
+
+    test('anotaciones hechas DESPUÉS se conservan en su página original', () {
+      final snapshot = [row('a', 1)];
+      final current = [row('a', 3), row('nueva', 1, createdAt: 99)]; // en orig 3
+      final r = PageEditRepository.mergeAnnotationsForUndo(
+        snapshotRows: snapshot, currentRows: current, pageMapping: mapping,
+      );
+      expect(pages(r.rows), {'a': 1, 'nueva': 3});
+      expect(r.lost, 0);
+    });
+
+    test('las hechas en páginas AGREGADAS por la edición se informan como perdidas', () {
+      final current = [row('enPaginaNueva', 2, createdAt: 99)];
+      final r = PageEditRepository.mergeAnnotationsForUndo(
+        snapshotRows: const [], currentRows: current, pageMapping: mapping,
+      );
+      expect(r.rows, isEmpty);
+      expect(r.lost, 1);
+    });
+
+    test('si el usuario borró una anotación después de la edición, no revive', () {
+      final snapshot = [row('a', 1)];
+      final r = PageEditRepository.mergeAnnotationsForUndo(
+        snapshotRows: snapshot, currentRows: const [], pageMapping: mapping,
+      );
+      expect(r.rows, isEmpty);
+    });
+  });
+
   group('remap / restore de anotaciones', () {
     setUp(() {
       AppData.db = AppDatabase(executor: NativeDatabase.memory());
