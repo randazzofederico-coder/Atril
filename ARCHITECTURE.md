@@ -1,6 +1,6 @@
 # ARCHITECTURE.md — Atril Digital (Flutter)
 
-**Estado del Proyecto:** Consolidación — **v1.18.0 (Blindaje de datos: papelera, backup/restore, importaciones, anotaciones)**
+**Estado del Proyecto:** Consolidación — **v1.19.0 (Cuenta opcional del ecosistema + blindaje de datos)**
 **Fecha de Análisis:** Noviembre 2026
 **Objetivo:** Ninguna operación (papelera, restore, importación, edición de páginas, deshacer) puede perder datos; cada camino crítico tiene tests de punta a punta.
 
@@ -152,6 +152,12 @@ La base de datos (`AppDatabase`) define la estructura core:
 * **Sincronización Cloud:** Soporte opcional para Drive/Dropbox.
 
 ---
+
+### 👤 Cuenta opcional (v1.19.0)
+* Sin login obligatorio: `main.dart` abre directo `HomeShell`. Se eliminó el login viejo (`auth_gate`, `login_screen`, `onboarding_screen`, cache de permisos/trial).
+* `fede_apps_core` (paquete compartido, `../fede_apps_core`): `FedeAccount` (Google, perfil `users/{uid}`), `AccountSection` y `EcosystemSection` en Ajustes (cuenta solo en Android/iOS/web), `UsageTracker` (métricas locales; actividad = lectura), `EcosystemPrompts.maybeShowAppsPrompt`.
+* Sin sincronización de biblioteca por ahora (`hasLibrary: false`).
+* Localización `es` (`flutter_localizations`, `intl ^0.20.2`).
 
 ### 🛡️ Garantías de integridad (v1.18.0)
 * **Restore destructivo seguro:** valida el `.atril` (`PRAGMA integrity_check` + lectura con el esquema actual) antes de tocar nada; resguarda DB y `docs/` como `*.restore_bak`; si algo falla vuelve a la biblioteca anterior; la DB siempre queda abierta.

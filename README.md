@@ -11,30 +11,26 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Flutter-3.x-blue?logo=flutter" alt="Flutter"/>
   <img src="https://img.shields.io/badge/Platform-Android%20|%20Windows%20|%20Web-green?logo=android" alt="Platform"/>
-  <img src="https://img.shields.io/badge/Firebase-Auth%20%2B%20Firestore-FFCA28?logo=firebase" alt="Firebase"/>
+  <img src="https://img.shields.io/badge/Cuenta-opcional-FFCA28?logo=firebase" alt="Cuenta opcional"/>
   <img src="https://img.shields.io/badge/License-Private-lightgrey" alt="License"/>
-  <img src="https://img.shields.io/badge/Version-1.18.0-orange" alt="Version"/>
+  <img src="https://img.shields.io/badge/Version-1.19.0-orange" alt="Version"/>
 </p>
 
 ---
 
 ## 📖 ¿Qué es Atril?
 
-**Atril** es una aplicación Flutter pensada para músicos que necesitan gestionar, leer y anotar partituras PDF con total fiabilidad durante una performance en vivo. Toda la biblioteca, anotaciones y configuración viven en el dispositivo. La autenticación y el control de acceso se gestionan mediante **Firebase Auth + Firestore**, permitiendo un sistema de suscripciones y pruebas gratuitas.
+**Atril** es una aplicación Flutter pensada para músicos que necesitan gestionar, leer y anotar partituras PDF con total fiabilidad durante una performance en vivo. Toda la biblioteca, anotaciones y configuración viven en el dispositivo. La **cuenta es opcional** (ecosistema de apps de Federico Randazzo, igual que Afinador, Metrónomo y Tone Generator): sin cuenta todo funciona offline.
 
 ---
 
 ## ✨ Funcionalidades
 
-### 🔐 Autenticación y Acceso
-- **Login con Google** (Android, iOS, Web) y **email/contraseña** con verificación por correo.
-- **Onboarding** para usuarios nuevos: el perfil se crea en Firestore y se notifica al administrador.
-- **Sistema de permisos** basado en roles (`admin`, `pendiente`, suscripción activa).
-- **Período de prueba gratuito** de 30 días, activable desde la app.
-- **Pantalla de acceso pendiente** con opciones de prueba, suscripción y reintento.
-- **Acceso offline por 30 días**: el último permiso verificado se cachea localmente. Cuando faltan ≤5 días aparece un aviso con botón **Reintentar**; la app además reintenta sola cada 2 minutos y al volver al primer plano, mostrando el error real si la verificación falla.
-- Recuperación de contraseña por email.
-
+### 👤 Cuenta (opcional)
+- **Sin login obligatorio**: la app abre directo en la biblioteca y funciona 100% offline.
+- **Cuenta del ecosistema** (`fede_apps_core`): "Continuar con Google" desde Ajustes (Android/iOS/web); misma cuenta que Afinador, Metrónomo y Tone Generator.
+- **Más apps**: acceso a las otras apps del ecosistema desde Ajustes.
+- Métricas de uso **solo locales** (no se envían a ningún servidor).
 ### 📚 Biblioteca de Partituras
 - **Carpetas anidables infinitas** con CRUD completo (crear, renombrar, mover, eliminar).
 - **Búsqueda global** por título de partitura.
@@ -123,19 +119,7 @@
 El proyecto sigue una arquitectura en capas con un **Patrón de Fachada** centralizado:
 
 ```
-                       ┌──────────────────────┐
-                       │   Firebase Auth       │
-                       │   (Google / Email)     │
-                       └──────────┬───────────┘
-                                  │
-                       ┌──────────▼───────────┐
-                       │     AuthGate          │
-                       │  PermissionChecker    │◄── Cloud Firestore
-                       │  (roles, trial, sub)  │    (usuarios, consultas_web)
-                       └──────────┬───────────┘
-                                  │ acceso concedido
-                                  │
-UI (Screens & Widgets)            ▼
+UI (Screens & Widgets)
      │                      ┌──────────┐
      ├── Action Delegates   │ HomeShell │
      │   (lógica de UI)     └──────────┘
@@ -188,9 +172,6 @@ lib/
 │   ├── annotation_stroke.dart # Modelo de trazo/anotación
 │   └── annotation_style.dart  # Estilo visual de anotaciones (compartido visor/exportación)
 ├── screens/
-│   ├── auth_gate.dart         # Flujo de autenticación y verificación de permisos
-│   ├── login_screen.dart      # Login (Google + email/contraseña)
-│   ├── onboarding_screen.dart # Registro de perfil para usuarios nuevos
 │   ├── home_shell.dart        # Shell con NavigationBar (Biblioteca / Setlists)
 │   ├── library/               # Biblioteca, scanner, editor de imagen, editor de páginas PDF, acciones de exportación
 │   ├── reader/                # Visor PDF, capa de anotaciones, toolbar
@@ -207,8 +188,8 @@ lib/
 | Componente | Tecnología |
 |:---|:---|
 | **Framework** | Flutter (Dart) • Material 3 |
-| **Autenticación** | Firebase Auth (Google Sign-In + Email/Password) |
-| **Cloud** | Cloud Firestore (perfiles, permisos, notificaciones admin) |
+| **Cuenta (opcional)** | `fede_apps_core` (Firebase Auth con Google, proyecto compartido del ecosistema) |
+| **Cloud** | Solo el perfil de la cuenta opcional (`users/{uid}`); la biblioteca no se sube |
 | **Base de datos local** | Drift (SQLite) con migraciones tipadas |
 | **Visor PDF** | `pdfrx` (renderizado rápido) |
 | **PDF Generation** | Syncfusion Flutter PDF |
@@ -228,21 +209,23 @@ lib/
 git clone <repo-url>
 cd pdf_setlist
 
-# 2. Instalar dependencias
+# 2. fede_apps_core (paquete compartido del ecosistema) debe estar al lado:
+#    ../fede_apps_core
+# 3. Instalar dependencias
 flutter pub get
 
-# 3. Configurar Firebase (si no existe firebase_options.dart)
+# 4. Configurar Firebase (si no existe firebase_options.dart)
 flutterfire configure
 
-# 4. Generar código de Drift (si es necesario)
+# 5. Generar código de Drift (si es necesario)
 dart run build_runner build --delete-conflicting-outputs
 
-# 5. Ejecutar la app
+# 6. Ejecutar la app
 flutter run
 ```
 
 ### Requisitos
-- Flutter SDK ≥ 3.0.0
+- Flutter SDK ≥ 3.38 (Dart ≥ 3.10)
 - Android SDK (minSdk 21) para Android
 - Proyecto Firebase configurado con Auth + Firestore habilitados
 - Un dispositivo o emulador Android, o bien compilar para Windows/Web
@@ -260,11 +243,7 @@ flutter run
 
 ## 🔒 Privacidad
 
-Atril utiliza **Firebase Auth** y **Cloud Firestore** exclusivamente para:
-- Autenticación del usuario (login y registro).
-- Verificación de permisos y suscripciones.
-- Notificaciones al administrador (onboarding, activación de trial).
-
+Atril funciona sin cuenta. Si el usuario elige iniciar sesión (opcional), se usa **Firebase Auth** con Google y se guarda un perfil básico (nombre y email) en **Cloud Firestore**, compartido con las otras apps del ecosistema.
 **La biblioteca de partituras, anotaciones y configuración se almacenan localmente en el dispositivo** y nunca se sincronizan con servidores. Atril no utiliza servicios de análisis ni publicidad.
 
 > Para más detalles, consultá [`privacy_policy.html`](privacy_policy.html).
