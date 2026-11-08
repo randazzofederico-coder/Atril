@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:fede_apps_core/fede_apps_core.dart' show UsageTracker;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:pdfrx/pdfrx.dart';
@@ -64,6 +65,8 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
     PageEditRepository.editRevision.addListener(_onPagesEdited);
     // Leyendo una partitura la pantalla no se apaga.
     AppData.settings.acquireScreenOn();
+    // Métrica local del ecosistema (tiempo de lectura; no se envía a ningún lado).
+    UsageTracker.instance.startActivity();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
@@ -74,6 +77,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
   void dispose() {
     PageEditRepository.editRevision.removeListener(_onPagesEdited);
     AppData.settings.releaseScreenOn();
+    UsageTracker.instance.stopActivity();
     _annotationController.dispose();
     _pageHintTimer?.cancel();
     // _controller?.dispose(); // Not required/available in pdfrx

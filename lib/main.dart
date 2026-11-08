@@ -1,7 +1,8 @@
+import 'package:fede_apps_core/fede_apps_core.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
-import 'screens/auth_gate.dart';
 import 'screens/home_shell.dart';
 import 'data/app_data.dart';
 
@@ -12,6 +13,20 @@ void main() async {
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
+
+  // Ecosistema (fede_apps_core): cuenta OPCIONAL y métricas solo locales.
+  // Nada de esto bloquea el arranque: sin conexión o sin cuenta, la app
+  // funciona igual (todo es local).
+  try {
+    await UsageTracker.instance.init();
+  } catch (e) {
+    debugPrint('UsageTracker.init falló: $e');
+  }
+  try {
+    FedeAccount.instance.init();
+  } catch (e) {
+    debugPrint('FedeAccount.init falló: $e');
+  }
 
   runApp(const AtrilApp());
 }
@@ -65,6 +80,11 @@ class AtrilApp extends StatelessWidget {
             return MaterialApp(
               title: 'Atril',
               debugShowCheckedModeBanner: false,
+              // La UI está en español: los textos del ecosistema
+              // (FacStrings) y los de Material siguen el mismo idioma.
+              locale: const Locale('es'),
+              supportedLocales: const [Locale('es'), Locale('en')],
+              localizationsDelegates: GlobalMaterialLocalizations.delegates,
               themeMode: AppData.settings.themeMode.value,
               theme: ThemeData(
                 useMaterial3: true,

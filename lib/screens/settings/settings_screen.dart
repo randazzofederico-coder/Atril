@@ -1,4 +1,6 @@
+import 'package:fede_apps_core/fede_apps_core.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../data/backup_manager.dart';
@@ -15,6 +17,23 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   bool _loading = false;
+
+  /// El login con Google (google_sign_in) solo existe en Android, iOS y web.
+  static bool get _accountSupported =>
+      kIsWeb ||
+      defaultTargetPlatform == TargetPlatform.android ||
+      defaultTargetPlatform == TargetPlatform.iOS;
+
+  @override
+  void initState() {
+    super.initState();
+    // Sugerencia ocasional de las otras apps (respeta límites del ecosistema).
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        EcosystemPrompts.maybeShowAppsPrompt(context, currentApp: FedeApp.atril);
+      }
+    });
+  }
 
   Future<void> _doBackup() async {
     setState(() => _loading = true);
@@ -127,6 +146,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
             )
           : ListView(
               children: [
+                // Cuenta del ecosistema: OPCIONAL. Sin cuenta todo funciona
+                // igual (la biblioteca es local).
+                if (_accountSupported) ...[
+                  _buildSectionHeader('Cuenta'),
+                  const AccountSection(hasLibrary: false, showHeader: false),
+                  const Divider(),
+                ],
+
                 _buildSectionHeader('Apariencia'),
                 _buildAppearanceSection(),
                 const Divider(),
@@ -150,6 +177,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       MaterialPageRoute(builder: (_) => const TrashBinScreen()),
                     );
                   },
+                ),
+                const Divider(),
+
+                _buildSectionHeader('Más apps'),
+                const EcosystemSection(
+                  currentApp: FedeApp.atril,
+                  showHeader: false,
+                  showSite: false, // el sitio ya está en "Acerca de"
                 ),
                 const Divider(),
 
