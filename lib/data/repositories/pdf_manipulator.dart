@@ -14,8 +14,21 @@ class PageEditEntry {
   /// If non-null, this page is a new image to be inserted.
   final String? imagePath;
 
-  const PageEditEntry.original(this.originalPageIndex) : imagePath = null;
-  const PageEditEntry.image(this.imagePath) : originalPageIndex = null;
+  /// Página de OTRO PDF (copiada sin pérdida, como las originales).
+  final String? externalPath;
+  final int? externalPageIndex; // 0-based
+
+  const PageEditEntry.original(this.originalPageIndex)
+      : imagePath = null,
+        externalPath = null,
+        externalPageIndex = null;
+  const PageEditEntry.image(this.imagePath)
+      : originalPageIndex = null,
+        externalPath = null,
+        externalPageIndex = null;
+  const PageEditEntry.external(String this.externalPath, int this.externalPageIndex)
+      : originalPageIndex = null,
+        imagePath = null;
 }
 
 /// Repository for PDF page-level manipulation.
@@ -110,6 +123,22 @@ class PdfManipulator {
     final resultDoc = PdfDocument();
     resultDoc.pageSettings.margins.all = 0;
 
+    // PDFs externos abiertos una sola vez cada uno
+    final externalDocs = <String, PdfDocument>{};
+
+    void copyPage(PdfPage srcPage) {
+      // Copia sin pérdida vía template
+      final template = srcPage.createTemplate();
+      final pageSize = srcPage.size;
+      resultDoc.pageSettings.size = pageSize;
+      final newPage = resultDoc.pages.add();
+      newPage.graphics.drawPdfTemplate(
+        template,
+        const ui.Offset(0, 0),
+        pageSize,
+      );
+    }
+
     final total = pageOrder.length;
 
     for (int i = 0; i < total; i++) {
@@ -117,16 +146,11 @@ class PdfManipulator {
 
       if (entry.originalPageIndex != null) {
         // Preserve original page via template (lossless copy)
-        final srcPage = sourceDoc.pages[entry.originalPageIndex!];
-        final template = srcPage.createTemplate();
-        final pageSize = srcPage.size;
-        resultDoc.pageSettings.size = pageSize;
-        final newPage = resultDoc.pages.add();
-        newPage.graphics.drawPdfTemplate(
-          template,
-          const ui.Offset(0, 0),
-          pageSize,
-        );
+        copyPage(sourceDoc.pages[entry.originalPageIndex!]);
+      } else if (entry.externalPath != null) {
+        final ext = externalDocs[entry.externalPath!] ??=
+            PdfDocument(inputBytes: await File(entry.externalPath!).readAsBytes());
+        copyPage(ext.pages[entry.externalPageIndex!]);
       } else if (entry.imagePath != null) {
         // Add new image page (same approach as PdfGenerator)
         await _addImagePage(resultDoc, entry.imagePath!);
@@ -143,6 +167,9 @@ class PdfManipulator {
 
     final pdfBytes = await resultDoc.save();
     sourceDoc.dispose();
+    for (final d in externalDocs.values) {
+      d.dispose();
+    }
     resultDoc.dispose();
 
     return Uint8List.fromList(pdfBytes);

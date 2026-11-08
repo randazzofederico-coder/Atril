@@ -1,6 +1,5 @@
 import 'dart:io';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
@@ -52,26 +51,44 @@ class _PageEntry {
   final String? originalImagePath;
   ImageEditParams? editParams;
 
+  /// Página tomada de OTRO PDF de la biblioteca (se copia sin pérdida).
+  final String? externalPath;
+  final int? externalPageIndex;
+
   bool get isOriginal => originalPageIndex != null;
-  bool get isNew => imagePath != null || isProcessing;
+  bool get isExternal => externalPath != null;
+  bool get isNew => imagePath != null || isProcessing || isExternal;
 
   _PageEntry.original({
     required this.originalPageIndex,
-    this.thumbnailPath,
   })  : imagePath = null,
         isProcessing = false,
         progress = 1.0,
         originalImagePath = null,
-        editParams = null;
+        editParams = null,
+        externalPath = null,
+        externalPageIndex = null;
 
   _PageEntry.image({
     required String this.imagePath,
     this.originalImagePath,
     this.editParams,
     this.isProcessing = false,
-    this.progress = 0.0,
   })  : originalPageIndex = null,
+        progress = 0.0,
+        externalPath = null,
+        externalPageIndex = null,
         thumbnailPath = imagePath; // For new images, the image IS the thumbnail
+
+  _PageEntry.external({
+    required String this.externalPath,
+    required int this.externalPageIndex,
+  })  : originalPageIndex = null,
+        imagePath = null,
+        isProcessing = false,
+        progress = 1.0,
+        originalImagePath = null,
+        editParams = null;
 }
 
 class _PdfPageEditorScreenState extends State<PdfPageEditorScreen> {
@@ -344,25 +361,25 @@ class _PdfPageEditorScreenState extends State<PdfPageEditorScreen> {
       return;
     }
 
-    // Add pages as "original from external PDF" — we render them to images
-    // and insert them as image pages into the editor
-    var undoPushed = false;
-    for (int i = 0; i < pageCount; i++) {
+    // Las páginas se agregan como referencias al otro PDF y al guardar se
+    // copian SIN PÉRDIDA (vectorial), igual que las originales. La miniatura
+    // es solo para mostrar.
+    final added = <_PageEntry>[];
+    setState(() {
+      _pushUndo(); // Un solo paso de deshacer para todo el lote
+      for (int i = 0; i < pageCount; i++) {
+        final entry = _PageEntry.external(externalPath: sourcePath, externalPageIndex: i);
+        added.add(entry);
+        _pages.add(entry);
+      }
+      _hasChanges = true;
+    });
+
+    for (final entry in added) {
       if (!mounted) break;
-      final thumbPath = await PdfManipulator.renderPageThumbnail(
-        sourcePath,
-        i,
-        thumbnailWidth: 600, // Higher quality for pages that will be in the final PDF
-      );
+      final thumbPath = await PdfManipulator.renderPageThumbnail(sourcePath, entry.externalPageIndex!);
       if (thumbPath != null && mounted) {
-        setState(() {
-          if (!undoPushed) {
-            _pushUndo(); // Un solo paso de deshacer para todo el lote
-            undoPushed = true;
-          }
-          _pages.add(_PageEntry.image(imagePath: thumbPath));
-          _hasChanges = true;
-        });
+        setState(() => entry.thumbnailPath = thumbPath);
       }
     }
 
@@ -515,6 +532,8 @@ class _PdfPageEditorScreenState extends State<PdfPageEditorScreen> {
     for (final page in _pages) {
       if (page.isOriginal) {
         pageOrder.add(PageEditEntry.original(page.originalPageIndex));
+      } else if (page.isExternal) {
+        pageOrder.add(PageEditEntry.external(page.externalPath!, page.externalPageIndex!));
       } else {
         pageOrder.add(PageEditEntry.image(page.imagePath));
       }
@@ -858,11 +877,8 @@ class _PdfPageEditorScreenState extends State<PdfPageEditorScreen> {
       itemBuilder: (context, index) {
         final page = _pages[index];
         return _PageTile(
-          key: ValueKey(
-            page.isOriginal
-                ? 'orig_${page.originalPageIndex}'
-                : 'new_${page.imagePath}_$index',
-          ),
+          // Key por identidad de la página: estable al reordenar.
+          key: ObjectKey(page),
           thumbnailPath: page.thumbnailPath,
           pageNumber: index + 1,
           isOriginal: page.isOriginal,
