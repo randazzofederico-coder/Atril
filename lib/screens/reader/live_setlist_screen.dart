@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import 'package:fede_apps_core/fede_apps_core.dart' show UsageTracker;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:pdfrx/pdfrx.dart';
@@ -66,6 +67,7 @@ class _LiveSetlistScreenState extends State<LiveSetlistScreen> {
     // En escena: pantalla siempre encendida y modo inmersivo.
     AppData.settings.acquireScreenOn();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    UsageTracker.instance.startActivity(); // métrica local del ecosistema
     _scores = AppData.materializeSetlist(widget.setlist);
     if (_scores.isNotEmpty) {
       _openScoreAt(widget.initialIndex);
@@ -75,6 +77,7 @@ class _LiveSetlistScreenState extends State<LiveSetlistScreen> {
   @override
   void dispose() {
     AppData.settings.releaseScreenOn();
+    UsageTracker.instance.stopActivity();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     _focusNode.dispose();
     super.dispose();
