@@ -180,7 +180,7 @@ class LibraryActions {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Eliminar carpeta'),
-        content: Text('¿Mover "${folder.name}" y su contenido a la papelera?\n\nPodrás restaurarlos desde Ajustes > Papelera.'),
+        content: Text('¿Mover "${folder.name}" y su contenido a la papelera?\n\nPodrás restaurarlos desde Ajustes > Papelera.${_setlistWarning(folderIds: [folderId])}'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
           FilledButton(
@@ -198,6 +198,23 @@ class LibraryActions {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Carpeta movida a la papelera')));
       }
     }
+  }
+
+  /// Texto de advertencia si alguno de los temas a borrar está en setlists
+  /// (mientras esté en la papelera desaparece de ellos).
+  static String _setlistWarning({List<String> docIds = const [], List<String> folderIds = const []}) {
+    final ids = <String>{...docIds};
+    for (final fId in folderIds) {
+      final folderSet = AppData.getRecursiveFolderIds(fId);
+      ids.addAll(AppData.library.where((s) => folderSet.contains(s.folderId)).map((s) => s.docId));
+    }
+    final names = AppData.setlists
+        .where((s) => s.docIds.any(ids.contains))
+        .map((s) => '"${s.name}"')
+        .toList();
+    if (names.isEmpty) return '';
+    return '\n\n⚠️ Está en ' + (names.length == 1 ? 'el setlist ' : 'los setlists ') +
+        '${names.join(', ')}. Mientras esté en la papelera no va a aparecer ahí.';
   }
 
   // ---------------------------------------------------------------------------
@@ -237,7 +254,7 @@ class LibraryActions {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Eliminar partitura'),
-        content: const Text('¿Mover este archivo a la papelera?\n\nPodrás restaurarlo desde Ajustes > Papelera.'),
+        content: Text('¿Mover este archivo a la papelera?\n\nPodrás restaurarlo desde Ajustes > Papelera.${_setlistWarning(docIds: [docId])}'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
           TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Mover a Papelera', style: TextStyle(color: Colors.red))),
@@ -246,7 +263,7 @@ class LibraryActions {
     );
 
     if (confirm == true) {
-       await AppData.deleteScore(docId);
+       await AppData.deleteItems(docIds: [docId], folderIds: const []);
     }
   }
 
@@ -267,7 +284,7 @@ class LibraryActions {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Mover a la papelera'),
-        content: Text('¿Mover $count elementos seleccionados a la papelera?\n\nPodrás restaurarlos desde Ajustes > Papelera.'),
+        content: Text('¿Mover $count elementos seleccionados a la papelera?\n\nPodrás restaurarlos desde Ajustes > Papelera.${_setlistWarning(docIds: docIds, folderIds: folderIds)}'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
           TextButton(

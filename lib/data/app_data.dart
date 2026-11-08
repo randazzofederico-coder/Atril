@@ -6,6 +6,7 @@ import '../models/folder.dart';
 import '../models/annotation_stroke.dart';
 import 'app_database.dart';
 import 'library_storage.dart';
+import 'temp_cleanup.dart';
 
 // --- REPOSITORIOS (FACHADA) ---
 // Exportamos para que las pantallas no necesiten cambiar sus imports
@@ -85,6 +86,14 @@ class AppData {
     await storage.init();
     await _performAutoCleanup(); // Auto-cleanup old trash
     await refreshLibrary();
+    // Temporales viejos (backups, exportaciones...): en segundo plano.
+    unawaited(() async {
+      try {
+        await TempCleanup.run(docsDir: await storage.getDocsDir());
+      } catch (e) {
+        debugPrint('TempCleanup falló: $e');
+      }
+    }());
   }
 
   static Future<void> _performAutoCleanup() async {
