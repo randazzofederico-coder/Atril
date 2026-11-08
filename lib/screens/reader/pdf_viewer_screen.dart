@@ -8,6 +8,7 @@ import 'package:pdfrx/pdfrx.dart';
 import 'annotation_layer.dart';
 import 'annotation_toolbar.dart';
 import '../../models/annotation_stroke.dart';
+import '../../models/annotation_style.dart';
 import '../../models/score.dart';
 import '../../data/app_data.dart';
 import '../library/pdf_page_editor_screen.dart';
@@ -31,6 +32,9 @@ class PdfViewerScreen extends StatefulWidget {
 class _PdfViewerScreenState extends State<PdfViewerScreen> {
   late int _currentIndex;
   PdfViewerController? _controller;
+  /// Se incrementa en cada apertura: fuerza un State nuevo del visor aunque
+  /// el documento siguiente sea el mismo (p. ej. repetido en un setlist).
+  int _viewerGen = 0;
   final AnnotationLayerController _annotationController = AnnotationLayerController();
 
   // UI State
@@ -82,7 +86,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
   void _onPagesEdited() {
     if (!mounted) return;
     if (PageEditRepository.lastEditedDocId == _currentScore.docId) {
-      _openScore(_currentIndex);
+      _openScore(_currentIndex, forceReload: true);
     }
   }
 
@@ -90,16 +94,29 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
 
   Score get _currentScore => widget.sourceScores[_currentIndex];
 
-  void _openScore(int index) {
+  void _openScore(int index, {bool forceReload = false}) {
       if (index < 0 || index >= widget.sourceScores.length) return;
 
       // El historial de deshacer pertenece a un solo documento: al cambiar de
       // doc (o recargar tras editar páginas) se descarta, para que Deshacer
       // nunca borre trazos de otro PDF ni de páginas reubicadas.
       _annotationController.reset();
-      
-      // Cleanup old controller to ensure fresh state (zoom, etc)
-      // final oldCtrl = _controller; // Unused
+      _viewerGen++;
+
+      if (!forceReload && _controller != null) {
+        // Cambio de documento: controller nuevo en el MISMO frame (key nueva
+        // por doc). Sin pantalla intermedia en negro ni parpadeo de la UI.
+        setState(() {
+          _currentIndex = index;
+          _currentPage = 1;
+          _totalPages = 0;
+          _controller = PdfViewerController();
+        });
+        return;
+      }
+
+      // Recarga del MISMO archivo (p. ej. tras editar páginas): se desmonta el
+      // visor un frame para que pdfrx libere el documento y relea el archivo.
       setState(() {
          _currentIndex = index;
          _currentPage = 1;
@@ -109,7 +126,6 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
 
       // Post-frame to create new controller and mount new viewer
       WidgetsBinding.instance.addPostFrameCallback((_) {
-          // oldCtrl?.dispose(); // Not required in pdfrx
           if (mounted) {
              setState(() => _controller = PdfViewerController());
           }
@@ -158,11 +174,12 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
   }
 
   Future<void> _confirmClearPage() async {
+      final page = _currentPage;
       final ok = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
-          title: const Text('Borrar anotaciones de esta página'),
-          content: const Text('Esta acción no se puede deshacer.'),
+          title: Text('Borrar anotaciones de la página $page'),
+          content: const Text('Se borran todas las anotaciones de esta página. Podés recuperarlas con Deshacer.'),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(false),
@@ -176,21 +193,14 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
         ),
       );
       if (ok == true) {
-        await _annotationController.clearPage(_currentScore.docId, _currentPage);
+        await _annotationController.clearPage(_currentScore.docId, page);
       }
   }
 
   // --- Tool Color/Width Management ---
 
-  static Color _defaultColorForTool(AnnotationTool tool) {
-    switch (tool) {
-      case AnnotationTool.pen: return Colors.black;
-      case AnnotationTool.highlighter: return Colors.yellow;
-      case AnnotationTool.whiteout: return Colors.white;
-      case AnnotationTool.text: return Colors.black;
-      case AnnotationTool.stamp: return Colors.red;
-    }
-  }
+  static Color _defaultColorForTool(AnnotationTool tool) =>
+      AnnotationStyle.defaultColorForTool(tool);
 
   static double _defaultWidthForTool(AnnotationTool tool) {
     switch (tool) {
@@ -265,7 +275,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
                       : const ColorFilter.mode(Colors.transparent, BlendMode.dst),
                 child: PdfViewer.file(
                   score.filePath ?? '',
-                  key: ValueKey(score.docId), // NEW VIEWER ON DOC CHANGE
+                  key: ValueKey('${score.docId}_$_viewerGen'), // visor nuevo en cada apertura
                   controller: _controller,
                   params: PdfViewerParams(
                      panEnabled: !_editMode, // Disable navigation in edit mode
@@ -336,7 +346,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
                   child: GestureDetector(
                     behavior: HitTestBehavior.translucent, // Allow scroll through
                     onTap: _toggleChrome,
-                    onDoubleTap: () {}, // Let viewer handle double tap zoom?
+                    // (Sin onDoubleTap: registrarlo retrasaba ~300 ms cada tap)
                     child: Container(), // Transparent layer
                   ),
                 ),
@@ -406,13 +416,14 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
                                   final now = DateTime.now().millisecondsSinceEpoch;
                                   if (now - _lastJumpTime > 64) { // ~15fps limit for updates
                                       _lastJumpTime = now;
-                                      _controller?.goToPage(pageNumber: target);
+                                      // Sin animación mientras se arrastra (evita animaciones superpuestas)
+                                      _controller?.goToPage(pageNumber: target, duration: Duration.zero);
                                   }
                                 },
                                 onChangeEnd: (val) {
                                     setState(() => _draggedPage = null);
                                     // Ensure final position is reached
-                                    _controller?.goToPage(pageNumber: val.toInt());
+                                    _controller?.goToPage(pageNumber: val.toInt(), duration: Duration.zero);
                                 },
                               ),
                             ),
