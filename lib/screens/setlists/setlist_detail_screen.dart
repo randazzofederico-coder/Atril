@@ -239,36 +239,39 @@ class _SetlistDetailScreenState extends State<SetlistDetailScreen> {
           
           body: scores.isEmpty
               ? _EmptyState(onAdd: () => _addToSetlist(setlist))
-              : _isEditing
-                  // 2. Estado: Modo Edición (Reordenar y Borrar)
-                  ? ReorderableListView.builder(
-                      padding: listPadding,
-                      itemCount: scores.length,
-                      onReorder: (oldIndex, newIndex) {
-                        _guard(AppData.reorderDocInSetlist(setlist.setlistId, oldIndex, newIndex));
-                      },
-                      itemBuilder: (context, index) {
-                        final score = scores[index];
-                        return _EditableScoreTile(
-                          key: ValueKey(score.docId),
-                          index: index,
-                          score: score,
-                          onRemove: () => _removeDoc(setlist, score),
-                        );
-                      },
-                    )
-                  // 3. Estado: Modo Visualización (Leer y Abrir)
-                  : ListView.builder(
-                      padding: listPadding,
-                      itemCount: scores.length,
-                      itemBuilder: (context, index) {
-                        // final score = scores[index]; // Unused
-                        return _ViewScoreTile(
-                          index: index,
-                          sourceScores: scores,
-                        );
-                      },
-                    ),
+              // Una sola lista reordenable para ambos modos: mantener
+              // presionado un tema (en modo lectura) activa el modo edición y
+              // ese mismo gesto ya arrastra el tema para reordenar.
+              : ReorderableListView.builder(
+                  padding: listPadding,
+                  itemCount: scores.length,
+                  onReorderStart: (_) {
+                    if (!_isEditing) setState(() => _isEditing = true);
+                  },
+                  onReorder: (oldIndex, newIndex) {
+                    _guard(AppData.reorderDocInSetlist(setlist.setlistId, oldIndex, newIndex));
+                  },
+                  itemBuilder: (context, index) {
+                    final score = scores[index];
+                    if (_isEditing) {
+                      // Modo edición: reordenar y quitar
+                      return _EditableScoreTile(
+                        key: ValueKey(score.docId),
+                        index: index,
+                        score: score,
+                        onRemove: () => _removeDoc(setlist, score),
+                      );
+                    }
+                    // Modo lectura: tocar abre el tema
+                    return KeyedSubtree(
+                      key: ValueKey(score.docId),
+                      child: _ViewScoreTile(
+                        index: index,
+                        sourceScores: scores,
+                      ),
+                    );
+                  },
+                ),
         );
       },
     );
