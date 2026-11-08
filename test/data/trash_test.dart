@@ -26,22 +26,62 @@ void main() {
 
   Future<DocsTableData?> getDoc(String id) => AppData.db.getDocById(id);
 
-  test('restaurar un doc cuya carpeta sigue en la papelera lo lleva a la raíz', () async {
-    await folder('f1');
-    await doc('d1', 'f1');
-    await AppData.db.softDeleteDoc('d1');
-    await AppData.db.softDeleteFolder('f1');
+  test('restaurar un doc cuya ruta sigue en la papelera recrea la ruta (misma ubicación)', () async {
+    await folder('jazz');
+    await folder('std', parent: 'jazz');
+    await folder('otra', parent: 'jazz'); // hermana: NO debe restaurarse
+    await doc('d1', 'std');
+    await doc('d2', 'std'); // hermano: NO debe restaurarse
+    for (final d in ['d1', 'd2']) {
+      await AppData.db.softDeleteDoc(d);
+    }
+    for (final f in ['std', 'otra', 'jazz']) {
+      await AppData.db.softDeleteFolder(f);
+    }
 
     await LibraryRepository.restoreItems(docIds: ['d1'], folderIds: []);
 
     final d1 = await getDoc('d1');
     expect(d1!.isDeleted, isFalse);
-    expect(d1.folderId, 'root');
+    expect(d1.folderId, 'std'); // misma ubicación que antes
+    expect((await AppData.db.getFolderById('std'))!.isDeleted, isFalse);
+    expect((await AppData.db.getFolderById('jazz'))!.isDeleted, isFalse);
+    // Solo se restauró la ruta, no el resto del contenido
+    expect((await AppData.db.getFolderById('otra'))!.isDeleted, isTrue);
+    expect((await getDoc('d2'))!.isDeleted, isTrue);
+  });
 
-    // Y al purgar la carpeta, el doc restaurado sigue vivo.
-    await LibraryRepository.permanentlyDeleteItems(docIds: [], folderIds: ['f1']);
-    expect(await getDoc('d1'), isNotNull);
-    expect(await AppData.db.getFolderById('f1'), isNull);
+  test('si una carpeta de la ruta ya fue purgada, la rama existente cuelga de la raíz', () async {
+    await folder('jazz');
+    await folder('std', parent: 'jazz');
+    await doc('d1', 'std');
+    await AppData.db.softDeleteDoc('d1');
+    await AppData.db.softDeleteFolder('std');
+    // 'jazz' se purgó (ya no existe) pero 'std' sigue en la papelera
+    await AppData.db.setFolderParent('std', null);
+    await AppData.db.customStatement("UPDATE folders_table SET parent_id = 'jazz' WHERE id = 'std'");
+    await AppData.db.customStatement('PRAGMA foreign_keys = OFF');
+    await AppData.db.deleteFolder('jazz');
+    await AppData.db.customStatement('PRAGMA foreign_keys = ON');
+
+    await LibraryRepository.restoreItems(docIds: ['d1'], folderIds: []);
+
+    final std = await AppData.db.getFolderById('std');
+    expect(std!.isDeleted, isFalse);
+    expect(std.parentId, isNull); // cuelga de la raíz
+    expect((await getDoc('d1'))!.folderId, 'std');
+  });
+
+  test('si la carpeta del doc ya no existe, el doc vuelve a la raíz', () async {
+    await folder('f1');
+    await doc('d1', 'f1');
+    await AppData.db.softDeleteDoc('d1');
+    await AppData.db.customStatement('PRAGMA foreign_keys = OFF');
+    await AppData.db.deleteFolder('f1');
+    await AppData.db.customStatement('PRAGMA foreign_keys = ON');
+
+    await LibraryRepository.restoreItems(docIds: ['d1'], folderIds: []);
+    expect((await getDoc('d1'))!.folderId, 'root');
   });
 
   test('purgar una carpeta rescata documentos y subcarpetas activos', () async {
@@ -91,7 +131,7 @@ void main() {
     expect(items.map((i) => i.docId), ['d2']);
   });
 
-  test('restaurar una subcarpeta cuyo padre sigue borrado la lleva a la raíz', () async {
+  test('restaurar una subcarpeta cuyo padre sigue borrado restaura también el padre', () async {
     await folder('padre');
     await folder('hija', parent: 'padre');
     await doc('d1', 'hija');
@@ -103,7 +143,8 @@ void main() {
 
     final hija = await AppData.db.getFolderById('hija');
     expect(hija!.isDeleted, isFalse);
-    expect(hija.parentId, isNull);
+    expect(hija.parentId, 'padre'); // misma ubicación
+    expect((await AppData.db.getFolderById('padre'))!.isDeleted, isFalse);
     expect((await getDoc('d1'))!.isDeleted, isFalse);
     expect((await getDoc('d1'))!.folderId, 'hija');
   });

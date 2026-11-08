@@ -218,12 +218,14 @@ class LibraryRepository {
 
   // --- RESTORE ---
 
-  /// Restaura documentos y carpetas de la papelera.
+  /// Restaura documentos y carpetas de la papelera EN SU UBICACIÓN ORIGINAL.
   ///
-  /// Si el contenedor de un elemento sigue en la papelera (o ya no existe),
-  /// el elemento se restaura en la RAÍZ. Así nunca queda "colgando" de una
-  /// carpeta oculta (y nunca se purga junto con ella más tarde).
-  /// Todo ocurre en una transacción.
+  /// Si las carpetas que lo contenían también están en la papelera, se
+  /// restauran (solo las carpetas de la ruta, no el resto de su contenido)
+  /// para que el elemento vuelva exactamente a donde estaba. Solo si alguna
+  /// carpeta de la ruta ya fue eliminada definitivamente, el elemento se
+  /// cuelga del primer nivel que todavía exista (o de la raíz).
+  /// Nunca queda "colgando" de una carpeta oculta. Todo en una transacción.
   static Future<void> restoreItems({
     required List<String> docIds, 
     required List<String> folderIds,
@@ -239,7 +241,7 @@ class LibraryRepository {
       for (final id in folderIds) {
         await _restoreFolderRecursive(id, onProgress: tick);
         final folder = await AppData.db.getFolderById(id);
-        if (folder != null && !await _isFolderVisible(folder.parentId)) {
+        if (folder != null && !await _ensureFolderPathVisible(folder.parentId)) {
           await AppData.db.setFolderParent(id, null);
         }
       }
@@ -247,7 +249,7 @@ class LibraryRepository {
         final doc = await AppData.db.getDocById(id);
         if (doc == null) continue;
         await AppData.db.restoreDoc(id);
-        if (!await _isFolderVisible(doc.folderId)) {
+        if (!await _ensureFolderPathVisible(doc.folderId)) {
           await AppData.db.setDocFolder(id, 'root');
         }
         tick();
@@ -255,11 +257,24 @@ class LibraryRepository {
     });
   }
 
-  /// `true` si la carpeta existe y no está en la papelera (o es la raíz).
-  static Future<bool> _isFolderVisible(String? folderId) async {
+  /// Hace visible la carpeta [folderId] y toda su ruta hasta la raíz,
+  /// restaurando de la papelera las carpetas borradas (solo la carpeta, no
+  /// su contenido).
+  ///
+  /// Devuelve `false` si la carpeta ya no existe (fue purgada): el llamador
+  /// debe colgar el elemento de otro lado. Si un ancestro intermedio fue
+  /// purgado, la rama que sí existe se cuelga de la raíz.
+  static Future<bool> _ensureFolderPathVisible(String? folderId, [Set<String>? visited]) async {
     if (folderId == null || folderId == 'root') return true;
+    final seen = visited ?? <String>{};
+    if (!seen.add(folderId)) return true; // protección ante ciclos
     final f = await AppData.db.getFolderById(folderId);
-    return f != null && !f.isDeleted;
+    if (f == null) return false;
+    if (f.isDeleted) await AppData.db.restoreFolder(f.id);
+    if (!await _ensureFolderPathVisible(f.parentId, seen)) {
+      await AppData.db.setFolderParent(f.id, null);
+    }
+    return true;
   }
 
   static Future<void> _restoreFolderRecursive(String folderId, {required Function() onProgress}) async {
