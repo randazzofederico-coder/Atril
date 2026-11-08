@@ -335,6 +335,7 @@ class ExportManager {
   /// Retorna el ID del setlist creado, o null si falló.
   Future<String?> importSetlistFile(String filePath) async {
     Directory? extractDir;
+    final copiedFiles = <File>[];
     try {
       AppData.backgroundTaskProgress.value =
           const BackgroundTaskStatus(0.0, 'Importando setlist...');
@@ -355,17 +356,25 @@ class ExportManager {
           destPath: extractDir.path,
           sendPort: receivePort.sendPort,
         ),
+        onError: receivePort.sendPort,
+        onExit: receivePort.sendPort,
       );
 
-      await for (final message in receivePort) {
-        if (message is double) {
-          AppData.backgroundTaskProgress.value =
-              BackgroundTaskStatus(message, 'Descomprimiendo...');
-        } else if (message == 'DONE') {
-          break;
-        } else if (message is String && message.startsWith('ERROR:')) {
-          throw Exception(message);
+      try {
+        await for (final message in receivePort) {
+          if (message is double) {
+            AppData.backgroundTaskProgress.value =
+                BackgroundTaskStatus(message, 'Descomprimiendo...');
+          } else if (message == 'DONE') {
+            break;
+          } else if (message is String && message.startsWith('ERROR:')) {
+            throw Exception(message);
+          } else if (message == null || message is List) {
+            throw Exception('La descompresión terminó inesperadamente.');
+          }
         }
+      } finally {
+        receivePort.close();
       }
 
       // 2. Leer y parsear data.json
@@ -384,21 +393,13 @@ class ExportManager {
       final setlistName = data['setlistName'] as String? ?? 'Setlist importado';
       final items = (data['items'] as List).cast<Map<String, dynamic>>();
 
-      // 3. Crear carpeta en la biblioteca con el nombre del setlist
-      final folderId = AppData.newFolderId();
-      await AppData.db.createFolder(
-        id: folderId,
-        name: setlistName,
-        parentId: null, // Raíz de la biblioteca
-        position: 999,  // Al final
-      );
-
-      // 4. Importar PDFs dentro de la carpeta
+      // 3. Copiar los PDFs primero (fuera de la transacción), registrando
+      //    cada copia para poder borrarla si algo falla después.
       AppData.backgroundTaskProgress.value =
-          const BackgroundTaskStatus(0.5, 'Importando partituras...');
+          const BackgroundTaskStatus(0.3, 'Importando partituras...');
 
-      final newDocIds = <String>[];
       final docsDir = await AppData.storage.getDocsDir();
+      final pending = <_PendingSetlistDoc>[];
 
       for (int i = 0; i < items.length; i++) {
         final item = items[i];
@@ -410,8 +411,6 @@ class ExportManager {
           debugPrint('Warning: nombre de archivo inválido en el paquete: $rawFilename');
           continue;
         }
-        final title = item['title'] as String? ?? 'Sin título';
-        final author = item['author'] as String? ?? '';
 
         final sourceFile = File(p.join(extractDir.path, filename));
         if (!await sourceFile.exists()) {
@@ -423,54 +422,76 @@ class ExportManager {
         final newFilename = '$newDocId.pdf';
         final destFile = File(p.join(docsDir.path, newFilename));
         await sourceFile.copy(destFile.path);
+        copiedFiles.add(destFile);
 
-        await AppData.db.upsertDoc(
-          id: newDocId,
-          displayName: title,
-          author: author,
-          internalRelPath: p.join('docs', newFilename),
-          folderId: folderId, // Dentro de la carpeta del setlist
-        );
-
-        // Anotaciones editables (opcionales; formato retrocompatible)
-        final annotations = item['annotations'];
-        if (annotations is List) {
-          for (final raw in annotations) {
-            if (raw is! Map) continue;
-            try {
-              final stroke = AnnotationStroke.fromDbMap({
-                ...raw.cast<String, Object?>(),
-                'id': AppData.newId(prefix: 'stk'),
-                'doc_id': newDocId,
-              });
-              await AnnotationRepository.insertAnnotationStroke(stroke);
-            } catch (e) {
-              debugPrint('Warning: anotación inválida en $filename: $e');
-            }
-          }
-        }
-
-        newDocIds.add(newDocId);
+        pending.add(_PendingSetlistDoc(
+          docId: newDocId,
+          relPath: p.join('docs', newFilename),
+          title: item['title'] as String? ?? 'Sin título',
+          author: item['author'] as String? ?? '',
+          annotations: item['annotations'] is List ? item['annotations'] as List : const [],
+          filename: filename,
+        ));
 
         AppData.backgroundTaskProgress.value = BackgroundTaskStatus(
-          0.5 + (0.5 * (i + 1) / items.length),
+          0.3 + (0.6 * (i + 1) / items.length),
           'Importando partituras (${i + 1}/${items.length})...',
         );
       }
 
-      if (newDocIds.isEmpty) {
+      if (pending.isEmpty) {
         throw Exception('No se pudieron importar partituras del setlist.');
       }
 
-      // 5. Crear setlist
-      final uniqueName = AppData.uniqueSetlistName(setlistName);
+      // 4. Carpeta + partituras + anotaciones + setlist en UNA transacción
+      final folderId = AppData.newFolderId();
       final newSetlistId = AppData.newSetlistId();
+      final uniqueName = AppData.uniqueSetlistName(setlistName);
 
-      await AppData.db.upsertSetlist(id: newSetlistId, name: uniqueName);
-      await AppData.db.replaceSetlistItems(
-        setlistId: newSetlistId,
-        orderedDocIds: newDocIds,
-      );
+      await AppData.db.transaction(() async {
+        await AppData.db.createFolder(
+          id: folderId,
+          name: setlistName,
+          parentId: null, // Raíz de la biblioteca
+          position: 999,  // Al final
+        );
+
+        for (final d in pending) {
+          await AppData.db.upsertDoc(
+            id: d.docId,
+            displayName: d.title,
+            author: d.author,
+            internalRelPath: d.relPath,
+            folderId: folderId, // Dentro de la carpeta del setlist
+          );
+
+          // Anotaciones editables (opcionales; formato retrocompatible).
+          // Una anotación inválida se omite sin cancelar la importación.
+          for (final raw in d.annotations) {
+            if (raw is! Map) continue;
+            final AnnotationStroke stroke;
+            try {
+              stroke = AnnotationStroke.fromDbMap({
+                ...raw.cast<String, Object?>(),
+                'id': AppData.newId(prefix: 'stk'),
+                'doc_id': d.docId,
+              });
+            } catch (e) {
+              debugPrint('Warning: anotación inválida en ${d.filename}: $e');
+              continue;
+            }
+            await AnnotationRepository.insertAnnotationStroke(stroke);
+          }
+        }
+
+        await AppData.db.upsertSetlist(id: newSetlistId, name: uniqueName);
+        await AppData.db.replaceSetlistItems(
+          setlistId: newSetlistId,
+          orderedDocIds: [for (final d in pending) d.docId],
+        );
+      });
+
+      copiedFiles.clear(); // confirmado: los PDFs se quedan
 
       // 5. Refrescar biblioteca
       await AppData.refreshLibrary();
@@ -480,6 +501,9 @@ class ExportManager {
     } catch (e) {
       AppData.backgroundTaskProgress.value = null;
       debugPrint('Error importando setlist: $e');
+      for (final f in copiedFiles) {
+        try { if (await f.exists()) await f.delete(); } catch (_) {}
+      }
       rethrow;
     } finally {
       // Cleanup temp
@@ -575,6 +599,24 @@ class ExportManager {
 // =============================================================================
 // ISOLATE WORKER — TOP-LEVEL (requerido por Isolate.spawn)
 // =============================================================================
+
+/// Partitura de un .setlist ya copiada, pendiente de registrar en la DB.
+class _PendingSetlistDoc {
+  final String docId;
+  final String relPath;
+  final String title;
+  final String author;
+  final List annotations;
+  final String filename;
+  _PendingSetlistDoc({
+    required this.docId,
+    required this.relPath,
+    required this.title,
+    required this.author,
+    required this.annotations,
+    required this.filename,
+  });
+}
 
 /// Entrada para un archivo a incluir en el ZIP.
 class _ExportFileEntry {
