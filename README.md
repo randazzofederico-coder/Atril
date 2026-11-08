@@ -13,7 +13,7 @@
   <img src="https://img.shields.io/badge/Platform-Android%20|%20Windows%20|%20Web-green?logo=android" alt="Platform"/>
   <img src="https://img.shields.io/badge/Firebase-Auth%20%2B%20Firestore-FFCA28?logo=firebase" alt="Firebase"/>
   <img src="https://img.shields.io/badge/License-Private-lightgrey" alt="License"/>
-  <img src="https://img.shields.io/badge/Version-1.17.0-orange" alt="Version"/>
+  <img src="https://img.shields.io/badge/Version-1.18.0-orange" alt="Version"/>
 </p>
 
 ---
@@ -69,15 +69,15 @@
 - **Scrubber vertical** para saltar rápidamente entre páginas.
 - Navegación entre documentos dentro de una sesión de lectura.
 - **Inversión de colores**: simula modo nocturno para partituras con fondo blanco.
-- **Pantalla siempre encendida** (wakelock) para evitar bloqueos durante la performance.
+- **Pantalla siempre encendida** mientras se lee una partitura o se usa el Modo Vivo (independiente del ajuste global).
 
 ### ✏️ Anotaciones No Destructivas
 - **Lápiz**, **Resaltador** y **Borrador (Whiteout)** con grosor y color personalizables.
 - **Texto** insertable con tap sobre la página.
 - **Sellos** rápidos (iconos musicales: coda, segno, etc.).
-- Persistencia por página y por documento. Soporte futuro para capas por setlist.
+- Persistencia por página y por documento (una capa por partitura).
 - **Exportables**: se pueden compartir/exportar "quemadas" sobre el PDF o como datos editables (`.setlist`).
-- **Undo / Redo** global y borrado de página.
+- **Undo / Redo** por documento (nunca afecta a otro PDF) y "borrar página" que también se puede deshacer.
 - Preferencias de herramientas (último color/grosor usado) guardadas automáticamente.
 
 ### 🎵 Setlists
@@ -89,16 +89,18 @@
 
 ### 🗑️ Papelera de Reciclaje
 - Los elementos eliminados se ocultan de la interfaz principal (Soft Delete).
-- **Restauración rápida** preservando metadatos y anotaciones.
+- **Restauración rápida** preservando metadatos y anotaciones. Si la carpeta original sigue en la papelera, el elemento vuelve a la raíz.
+- **Purga segura**: nunca elimina partituras activas; al purgar una carpeta, lo que siga activo adentro se rescata a la raíz. Al purgar se borran también sus anotaciones.
 - **Auto-limpieza**: eliminación física automática tras 30 días.
 - Accesible desde Configuración.
 
 ### 💾 Backup y Exportación
-- **Backup completo** (`.atril`): empaqueta la base de datos + todos los PDFs en un solo archivo comprimido.
-- **Importación de backup**: agrega el contenido de un backup a la biblioteca existente sin reemplazar, **incluyendo las anotaciones**.
-- **Restauración destructiva**: reemplaza toda la biblioteca con un backup anterior.
+- **Backup completo** (`.atril`): empaqueta la base de datos (snapshot consistente con `VACUUM INTO`) + todos los PDFs en un solo archivo comprimido.
+- **Importación de backup**: agrega el contenido de un backup a la biblioteca existente sin reemplazar (carpetas, partituras, **anotaciones y setlists**). Es transaccional: si falla no deja nada a medias.
+- **Restauración destructiva**: reemplaza toda la biblioteca con un backup anterior. El backup se **valida antes** de tocar nada y, si algo falla, la biblioteca anterior se recupera automáticamente.
 - **Exportación para PC**: genera un ZIP legible con la estructura de carpetas y nombres originales, **con o sin anotaciones** aplicadas sobre los PDFs (títulos repetidos en una carpeta se desambiguan como `Título (2).pdf`).
 - Todo procesado con **Isolates** y barras de progreso en tiempo real.
+- Protección contra archivos maliciosos (zip-slip / rutas fuera del destino) y limpieza automática de temporales.
 
 ### 📤 Compartir / Importar (100% Offline)
 - **Compartir PDF individual** desde el menú contextual (⋮) o desde el **visor PDF**, con nombre de display.
@@ -165,6 +167,7 @@ lib/
 │   ├── app_data.dart          # Fachada Global (cache, IDs, delegación)
 │   ├── app_database.dart      # Schema Drift (SQLite) con migraciones
 │   ├── library_storage.dart   # Abstracción de FileSystem
+│   ├── temp_cleanup.dart      # Limpieza de temporales al iniciar
 │   ├── backup_manager.dart    # Lógica de backup/restore/export con Isolates
 │   ├── export_manager.dart    # Compartir/Importar PDFs y Setlists con Isolates
 │   ├── file_receiver_channel.dart # MethodChannel para archivos entrantes
@@ -182,10 +185,8 @@ lib/
 │   ├── score.dart             # Modelo de partitura
 │   ├── folder.dart            # Modelo de carpeta
 │   ├── setlist.dart           # Modelo de setlist
-│   ├── setlist_nav_context.dart # Contexto de navegación en setlist
 │   ├── annotation_stroke.dart # Modelo de trazo/anotación
-│   ├── annotation_style.dart  # Estilo visual de anotaciones (compartido visor/exportación)
-│   └── app_data_types.dart    # Tipos compartidos (BackgroundTaskStatus, etc.)
+│   └── annotation_style.dart  # Estilo visual de anotaciones (compartido visor/exportación)
 ├── screens/
 │   ├── auth_gate.dart         # Flujo de autenticación y verificación de permisos
 │   ├── login_screen.dart      # Login (Google + email/contraseña)

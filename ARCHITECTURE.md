@@ -1,8 +1,8 @@
 # ARCHITECTURE.md — Atril Digital (Flutter)
 
-**Estado del Proyecto:** Consolidación — **v1.17.1 (Fix revalidación de acceso offline)**
+**Estado del Proyecto:** Consolidación — **v1.18.0 (Blindaje de datos: papelera, backup/restore, importaciones, anotaciones)**
 **Fecha de Análisis:** Noviembre 2026
-**Objetivo:** Compartir/exportar con o sin anotaciones y que la edición de páginas nunca pierda anotaciones.
+**Objetivo:** Ninguna operación (papelera, restore, importación, edición de páginas, deshacer) puede perder datos; cada camino crítico tiene tests de punta a punta.
 
 ---
 
@@ -79,7 +79,7 @@ La base de datos (`AppDatabase`) define la estructura core:
 | **`FoldersTable`** | Jerarquía de carpetas. `parent_id` permite anidamiento infinito. Soporta **Soft Delete** (`isDeleted`, `deletedAt`). |
 | **`SetlistsTable`** | Cabeceras de listas de reproducción (Nombre, Notas). |
 | **`SetlistItemsTable`** | Tabla pivote (Many-to-Many) ordenada. Vincula `Setlist` <-> `Doc`. |
-| **`AnnotationStrokesTable`** | Trazos de tinta vectoriales. Vinculados a `docId` + `pageIndex`. Opcionalmente a `setlistId` (capa no destructiva). |
+| **`AnnotationStrokesTable`** | Trazos de tinta vectoriales. Vinculados a `docId` + `pageIndex` (una capa por documento). La columna `setlistId` se conserva solo por compatibilidad (siempre null). Índice `(doc_id, page_index)`. |
 | **`DocStateTable`** | Estado de lectura por archivo (ej. última página vista). |
 
 ---
@@ -124,7 +124,7 @@ La base de datos (`AppDatabase`) define la estructura core:
         * Los archivos borrados se ocultan de la interfaz principal.
         * Restauración rápida con preservación de metadatos y anotaciones.
         * **Auto-cleanup**: Eliminación física automática tras 30 días.
-        * Integración inteligente con backups e importaciones.
+        * Restaurar un elemento cuyo contenedor sigue borrado lo lleva a la raíz; la purga nunca borra partituras activas (las rescata) y elimina también sus anotaciones. Todo en transacciones.
 * **Compartir / Exportar (Offline):**
     * **Compartir PDF individual** desde el menú contextual (⋮) o el visor PDF, con nombre de display.
     * **Con o sin anotaciones** (`ExportActions` + `askIncludeAnnotations`): solo se pregunta si hay anotaciones involucradas. "Con anotaciones" usa `PdfAnnotationFlattener` sobre copias temporales; el original nunca se modifica.
@@ -152,6 +152,17 @@ La base de datos (`AppDatabase`) define la estructura core:
 * **Sincronización Cloud:** Soporte opcional para Drive/Dropbox.
 
 ---
+
+### 🛡️ Garantías de integridad (v1.18.0)
+* **Restore destructivo seguro:** valida el .atril (PRAGMA integrity_check + lectura con el esquema actual) antes de tocar nada; resguarda DB y docs/ como *.restore_bak; si algo falla vuelve a la biblioteca anterior; la DB siempre queda abierta.
+* **Backup consistente:** VACUUM INTO en lugar de copiar el SQLite en caliente.
+* **Importaciones transaccionales** (backup merge y .setlist): se copian los PDFs, se escribe todo en una transacción y, si falla, se borran los PDFs copiados.
+* **Zip-slip / rutas:** los workers de descompresión, data.json y MainActivity no permiten escribir fuera del destino.
+* **Anotaciones:** historial de deshacer por documento (se reinicia al cambiar de doc o editar páginas); "borrar página" deshacible; deshacer una edición de páginas reubica las anotaciones hechas después (solo se pierden las de páginas agregadas por esa edición, con aviso).
+* **Memoria/DB consistentes:** efreshLibrary atómico y serializado; los setlists persisten antes de tocar la memoria.
+* **Arranque robusto:** la auto-limpieza de papelera y de temporales no puede impedir que la app arranque.
+* **Migración v5:** purga anotaciones huérfanas + índices; la migración v1→v4 ya no falla por columnas duplicadas.
+* **Tests:** 44 (papelera, backup/restore e importaciones de punta a punta con isolates reales, migraciones, anotaciones, setlists).
 
 ## 5. Estructura de Directorios Clave
 
