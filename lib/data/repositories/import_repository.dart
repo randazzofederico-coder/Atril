@@ -33,18 +33,6 @@ class ImportState {
       : null;
 }
 
-/// DTO legacy para reportar el progreso
-class ImportStatus {
-  final int count;
-  final String currentFile;
-  final bool completed;
-
-  const ImportStatus({
-    required this.count,
-    required this.currentFile,
-    this.completed = false,
-  });
-}
 
 // --- CLASE REPOSITORIO ---
 

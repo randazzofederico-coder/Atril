@@ -381,10 +381,6 @@ class LibraryRepository {
   static Future<void> permanentlyDeleteScore(String docId) =>
       permanentlyDeleteItems(docIds: [docId], folderIds: const []);
 
-  @Deprecated('Use permanentlyDeleteScore instead')
-  static Future<void> deleteScore(String docId) async {
-    await AppData.db.softDeleteDoc(docId);
-  }
 
   // ---------------------------------------------------------------------------
   // HELPERS DE RECURSIVIDAD Y BÚSQUEDA

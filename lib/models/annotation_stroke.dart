@@ -129,10 +129,6 @@ class AnnotationStroke {
     return jsonEncode(arr);
   }
 
-  static List<Offset> decodePoints(String jsonStr) {
-    return _decodePoints(jsonStr);
-  }
-
   String _encodeData() {
     if (tool == AnnotationTool.text || tool == AnnotationTool.stamp) {
       // Store as object

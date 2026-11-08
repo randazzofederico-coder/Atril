@@ -221,32 +221,6 @@ class LibraryActions {
   // GESTIÓN DE SCORES (CRUD)
   // ---------------------------------------------------------------------------
 
-  static Future<void> renameScore(BuildContext context, String docId) async {
-    final doc = AppData.getScoreById(docId);
-    if (doc == null) return;
-    
-    final controller = TextEditingController(text: doc.title);
-    final newName = await showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Renombrar archivo'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          textCapitalization: TextCapitalization.sentences,
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancelar')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, controller.text), child: const Text('Renombrar')),
-        ],
-      ),
-    );
-
-    if (newName != null && newName.isNotEmpty) {
-       await AppData.renameScore(docId, newName);
-    }
-  }
-
   static Future<void> deleteScore(BuildContext context, String docId) async {
     // Confirmación opcional para borrado individual? Por ahora directo o agregar confirmación si deseas.
     // Usaremos confirmación simple para consistencia.

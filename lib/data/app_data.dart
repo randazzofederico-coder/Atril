@@ -286,11 +286,6 @@ class AppData {
      _scoresById[s.docId] = s;
   }
 
-  static void _removeScoreLocal(String id) {
-    library.removeWhere((s) => s.docId == id);
-    _scoresById.remove(id);
-  }
-
   // ===========================================================================
   // ACTION DELEGATES (FACHADA)
   // Redireccionan a los Repositorios correspondientes.
@@ -427,11 +422,6 @@ class AppData {
     }
   }
   
-  static Future<void> deleteScore(String docId, {bool refresh = true}) async {
-    await LibraryRepository.deleteScore(docId);
-    _removeScoreLocal(docId);
-    if (refresh) _notifyLibrary(); 
-  }
   
   static String uniqueTitle(String desiredTitle) => 
       LibraryRepository.uniqueTitle(desiredTitle);

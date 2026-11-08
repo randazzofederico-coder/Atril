@@ -110,44 +110,4 @@ class LibraryStorage {
 
     return docRelPath(docId);
   }
-
-  /// NUEVO: Guardar un PDF desde Bytes en memoria (Usado para importación SAF).
-  Future<String> savePdfFromBytes({
-    required Uint8List bytes,
-    required String docId,
-  }) async {
-    final destPath = docAbsPath(docId);
-    final file = File(destPath);
-    
-    // Si ya existe algo con ese ID (raro porque el ID es nuevo), limpiamos
-    if (await file.exists()) {
-      await file.delete();
-    }
-
-    await file.writeAsBytes(bytes, flush: true);
-    return docRelPath(docId);
-  }
-
-  Future<void> deleteDocFile(String docId) async {
-    final f = File(docAbsPath(docId));
-    if (await f.exists()) {
-      await f.delete();
-    }
-  }
-
-  Future<String> duplicateDocFile({
-    required String sourceDocId,
-    required String newDocId,
-  }) async {
-    final src = File(docAbsPath(sourceDocId));
-    if (!await src.exists()) {
-      throw FileSystemException('No existe el archivo fuente', src.path);
-    }
-
-    final destPath = docAbsPath(newDocId);
-    final tmpPath = '$destPath.tmp';
-    await src.copy(tmpPath);
-    await File(tmpPath).rename(destPath);
-    return docRelPath(newDocId);
-  }
 }
