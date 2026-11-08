@@ -257,7 +257,6 @@ class ExportManager {
               // IDs locales: se regeneran al importar
               m.remove('id');
               m.remove('doc_id');
-              m.remove('setlist_id');
               return m;
             }).toList();
           }
@@ -436,7 +435,6 @@ class ExportManager {
                 ...raw.cast<String, Object?>(),
                 'id': AppData.newId(prefix: 'stk'),
                 'doc_id': newDocId,
-                'setlist_id': null,
               });
               await AnnotationRepository.insertAnnotationStroke(stroke);
             } catch (e) {

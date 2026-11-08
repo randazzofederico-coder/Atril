@@ -351,11 +351,11 @@ class BackupManager {
           for (final s in extStrokes) {
             final newDocId = docIdMap[s.docId];
             if (newDocId == null) continue;
+            if (s.setlistId != null) continue; // capas legacy por setlist: no se usan
             await AppData.db.insertAnnotationStroke(
               AnnotationStrokesTableCompanion.insert(
                 id: AppData.newId(prefix: 'stk'),
                 docId: newDocId,
-                // Las capas por setlist no se migran (los setlists no se importan)
                 setlistId: const Value(null),
                 pageIndex: s.pageIndex,
                 tool: s.tool,

@@ -67,6 +67,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
   @override
   void dispose() {
     PageEditRepository.editRevision.removeListener(_onPagesEdited);
+    _annotationController.dispose();
     _pageHintTimer?.cancel();
     // _controller?.dispose(); // Not required/available in pdfrx
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
@@ -88,6 +89,11 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
 
   void _openScore(int index) {
       if (index < 0 || index >= widget.sourceScores.length) return;
+
+      // El historial de deshacer pertenece a un solo documento: al cambiar de
+      // doc (o recargar tras editar páginas) se descarta, para que Deshacer
+      // nunca borre trazos de otro PDF ni de páginas reubicadas.
+      _annotationController.reset();
       
       // Cleanup old controller to ensure fresh state (zoom, etc)
       // final oldCtrl = _controller; // Unused
@@ -167,7 +173,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
         ),
       );
       if (ok == true) {
-        await _annotationController.clearPage(_currentScore.docId, _currentPage, null);
+        await _annotationController.clearPage(_currentScore.docId, _currentPage);
       }
   }
 

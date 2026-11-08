@@ -5,105 +5,140 @@ import '../../data/app_data.dart';
 import '../../models/annotation_stroke.dart';
 import '../../models/annotation_style.dart';
 
-/// Overlay layer that displays and (optionally) edits non-destructive annotations.
-///
-/// v1 scope:
-/// - Global layer only (setlistId = null).
-/// - Freehand strokes (pen + highlighter).
-///
-/// Coordinates are normalized [0..1] relative to the viewport used for drawing.
-/// This keeps annotations stable across devices and resolutions.
-/// Imperative controller for [AnnotationLayer].
-///
-/// Useful to trigger undo/redo/clear from an external toolbar.
-/// Action types for Undo/Redo
-enum _HistoryRef { add } // 'buffer' implies cleared page dump (omitting for now, v1 only undoes Adds)
-
-class _HistoryEntry {
-  final _HistoryRef type;
-  final AnnotationStroke stroke;
-  _HistoryEntry(this.type, this.stroke);
+/// Página concreta de un documento (para notificar recargas).
+class AnnotationPageRef {
+  final String docId;
+  final int pageIndex;
+  const AnnotationPageRef(this.docId, this.pageIndex);
 }
 
-/// Overlay layer that displays and (optionally) edits non-destructive annotations.
+enum _HistoryType { add, clear }
+
+class _HistoryEntry {
+  final _HistoryType type;
+
+  /// add: un solo trazo. clear: todos los trazos borrados de la página.
+  final List<AnnotationStroke> strokes;
+  final String docId;
+  final int pageIndex;
+
+  _HistoryEntry.add(AnnotationStroke s)
+      : type = _HistoryType.add,
+        strokes = [s],
+        docId = s.docId,
+        pageIndex = s.pageIndex;
+
+  _HistoryEntry.clear(this.docId, this.pageIndex, this.strokes) : type = _HistoryType.clear;
+}
+
+/// Controlador imperativo de las capas de anotación de UN documento a la vez.
 ///
-/// v1 scope:
-/// - Global layer only (setlistId = null).
-/// - Freehand strokes (pen + highlighter).
-///
-/// Coordinates are normalized [0..1] relative to the viewport used for drawing.
-/// This keeps annotations stable across devices and resolutions.
-/// Imperative controller for [AnnotationLayer].
-///
-/// Useful to trigger undo/redo/clear from an external toolbar.
+/// - Mantiene el historial de deshacer/rehacer. El historial pertenece a un
+///   solo documento: [reset] se debe llamar al cambiar de documento o cuando
+///   las páginas del documento cambian (edición de páginas), para que
+///   deshacer nunca toque trazos de otro PDF ni de páginas reubicadas.
+/// - Serializa las operaciones contra la DB (tocar Deshacer varias veces
+///   rápido no genera escrituras concurrentes).
 class AnnotationLayerController {
-  // Key: PageIndex, Value: ignored (just notifies)
-  final StreamController<int> _refreshController = StreamController<int>.broadcast();
-  Stream<int> get onPageRefresh => _refreshController.stream;
+  final StreamController<AnnotationPageRef> _refreshController =
+      StreamController<AnnotationPageRef>.broadcast();
+  Stream<AnnotationPageRef> get onPageRefresh => _refreshController.stream;
 
   final List<_HistoryEntry> _history = [];
   final List<_HistoryEntry> _redoStack = [];
 
-  // Registers a new stroke (committed by UI)
-  Future<void> addStroke(AnnotationStroke stroke) async {
-     await AppData.insertAnnotationStroke(stroke);
-     _history.add(_HistoryEntry(_HistoryRef.add, stroke));
-     _redoStack.clear();
-     _refresh(); // Notify listeners
+  Future<void> _queue = Future<void>.value();
+
+  /// Ejecuta [op] después de las operaciones anteriores (en orden).
+  Future<void> _run(Future<void> Function() op) {
+    final next = _queue.then((_) => op());
+    _queue = next.catchError((Object e) => debugPrint('Annotation op error: $e'));
+    return next;
   }
 
-  Future<void> undo() async {
-    if (_history.isEmpty) return;
-    final entry = _history.removeLast();
-    _redoStack.add(entry);
-
-    if (entry.type == _HistoryRef.add) {
-      await AppData.deleteAnnotationStroke(entry.stroke.id);
-      _refreshController.add(entry.stroke.pageIndex);
+  void _notify(String docId, int pageIndex) {
+    if (!_refreshController.isClosed) {
+      _refreshController.add(AnnotationPageRef(docId, pageIndex));
     }
   }
 
-  Future<void> redo() async {
-    if (_redoStack.isEmpty) return;
-    final entry = _redoStack.removeLast();
-    _history.add(entry);
+  /// Descarta el historial (al cambiar de documento o tras editar páginas).
+  void reset() {
+    _history.clear();
+    _redoStack.clear();
+  }
 
-    if (entry.type == _HistoryRef.add) {
-       await AppData.insertAnnotationStroke(entry.stroke);
-       _refreshController.add(entry.stroke.pageIndex);
-    }
-  }
-  
-  // For now, Clear Page is destructive (cannot undo easily without dumping all strokes to memory).
-  // We will just clear DB and history references to that page.
-  Future<void> clearPage(String docId, int pageIndex, String? setlistId) async {
-    await AppData.deleteAnnotationStrokesForPage(
-      docId: docId,
-      pageIndex: pageIndex,
-      setlistId: setlistId,
-    );
-    // Remove history entries for this page to avoid "undoing" a ghost stroke
-    _history.removeWhere((e) => e.stroke.pageIndex == pageIndex && e.stroke.docId == docId);
-    _redoStack.removeWhere((e) => e.stroke.pageIndex == pageIndex && e.stroke.docId == docId);
-    
-    _refreshController.add(pageIndex);
-  }
-  
-  void _refresh() {
-     // Notify all (or could accept pagenum to optimize)
-     // Since addStroke is specific to a page, we usually know. 
-     // But for now, let's just assume the last stroke knows its page.
-     if (_history.isNotEmpty) {
-       _refreshController.add(_history.last.stroke.pageIndex);
-     }
+  bool get canUndo => _history.isNotEmpty;
+  bool get canRedo => _redoStack.isNotEmpty;
+
+  /// Registra un trazo nuevo (la capa ya lo muestra de forma optimista).
+  Future<void> addStroke(AnnotationStroke stroke) => _run(() async {
+        await AppData.insertAnnotationStroke(stroke);
+        _history.add(_HistoryEntry.add(stroke));
+        _redoStack.clear();
+      });
+
+  Future<void> undo() => _run(() async {
+        if (_history.isEmpty) return;
+        final entry = _history.last;
+        switch (entry.type) {
+          case _HistoryType.add:
+            await AppData.deleteAnnotationStroke(entry.strokes.first.id);
+            break;
+          case _HistoryType.clear:
+            for (final s in entry.strokes) {
+              await AppData.insertAnnotationStroke(s);
+            }
+            break;
+        }
+        _history.removeLast();
+        _redoStack.add(entry);
+        _notify(entry.docId, entry.pageIndex);
+      });
+
+  Future<void> redo() => _run(() async {
+        if (_redoStack.isEmpty) return;
+        final entry = _redoStack.last;
+        switch (entry.type) {
+          case _HistoryType.add:
+            await AppData.insertAnnotationStroke(entry.strokes.first);
+            break;
+          case _HistoryType.clear:
+            for (final s in entry.strokes) {
+              await AppData.deleteAnnotationStroke(s.id);
+            }
+            break;
+        }
+        _redoStack.removeLast();
+        _history.add(entry);
+        _notify(entry.docId, entry.pageIndex);
+      });
+
+  /// Borra todos los trazos de una página. Se puede deshacer.
+  Future<void> clearPage(String docId, int pageIndex) => _run(() async {
+        final strokes = await AppData.getAnnotationStrokesForPage(
+          docId: docId,
+          pageIndex: pageIndex,
+        );
+        if (strokes.isEmpty) return;
+        await AppData.deleteAnnotationStrokesForPage(docId: docId, pageIndex: pageIndex);
+        _history.add(_HistoryEntry.clear(docId, pageIndex, strokes));
+        _redoStack.clear();
+        _notify(docId, pageIndex);
+      });
+
+  void dispose() {
+    _refreshController.close();
   }
 }
 
+/// Capa (overlay) que muestra y, opcionalmente, edita las anotaciones de UNA
+/// página. Las coordenadas se guardan normalizadas [0..1] respecto de la
+/// página, así que son estables entre dispositivos, resoluciones y zoom.
 class AnnotationLayer extends StatefulWidget {
   final AnnotationLayerController? controller;
 
   final String docId;
-  final String? setlistId; // future layer
   final int pageIndex; // 1-based
   final bool editable;
 
@@ -131,7 +166,6 @@ class AnnotationLayer extends StatefulWidget {
     required this.tool,
     required this.width,
     required this.color,
-    this.setlistId,
     this.ignorePointers = false,
     this.pageSize,
   });
@@ -141,36 +175,43 @@ class AnnotationLayer extends StatefulWidget {
 }
 
 class _AnnotationLayerState extends State<AnnotationLayer> {
-  final List<AnnotationStroke> _strokes = <AnnotationStroke>[];
-  // Local redo stack removed - handled by GLOBAL controller
+  /// Lista inmutable: se reemplaza (no se muta) para que el painter detecte
+  /// el cambio y repinte.
+  List<AnnotationStroke> _strokes = const <AnnotationStroke>[];
   
   // stroke being drawn (normalized points)
   List<Offset>? _draftPoints;
+  int _draftRevision = 0;
 
-  // pointer tracking to allow 2-finger pinch/zoom to reach the PDF viewer
+  // Pointer tracking: con 2+ dedos se cancela el trazo en curso.
   final Set<int> _activePointers = <int>{};
   bool _allowDrawing = true;
 
-  StreamSubscription? _refreshSub;
+  StreamSubscription<AnnotationPageRef>? _refreshSub;
 
   @override
   void initState() {
     super.initState();
-    // Listen for global events (Undo/Redo affects this page?)
-    _refreshSub = widget.controller?.onPageRefresh.listen((pageIndex) {
-       if (pageIndex == widget.pageIndex) {
-         _load();
-       }
-    });
+    _subscribe();
     _load();
+  }
+
+  void _subscribe() {
+    _refreshSub?.cancel();
+    _refreshSub = widget.controller?.onPageRefresh.listen((ref) {
+      if (ref.docId == widget.docId && ref.pageIndex == widget.pageIndex) {
+        _load();
+      }
+    });
   }
 
   @override
   void didUpdateWidget(covariant AnnotationLayer oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.docId != widget.docId ||
-        oldWidget.pageIndex != widget.pageIndex ||
-        oldWidget.setlistId != widget.setlistId) {
+    if (oldWidget.controller != widget.controller) {
+      _subscribe();
+    }
+    if (oldWidget.docId != widget.docId || oldWidget.pageIndex != widget.pageIndex) {
       _load();
     }
   }
@@ -182,18 +223,39 @@ class _AnnotationLayerState extends State<AnnotationLayer> {
   }
 
   Future<void> _load() async {
+    final docId = widget.docId;
+    final pageIndex = widget.pageIndex;
     final rows = await AppData.getAnnotationStrokesForPage(
-      docId: widget.docId,
-      pageIndex: widget.pageIndex,
-      setlistId: widget.setlistId,
+      docId: docId,
+      pageIndex: pageIndex,
     );
-    if (!mounted) return;
+    // Si mientras tanto cambió la página/doc, descartamos el resultado viejo.
+    if (!mounted || docId != widget.docId || pageIndex != widget.pageIndex) return;
     setState(() {
-      _strokes
-        ..clear()
-        ..addAll(rows);
-      _draftPoints = null;
+      _strokes = List.unmodifiable(rows);
     });
+  }
+
+  Future<void> _persist(AnnotationStroke stroke) async {
+    // Optimista: se muestra ya; la persistencia sigue en segundo plano.
+    setState(() => _strokes = List.unmodifiable([..._strokes, stroke]));
+
+    try {
+      if (widget.controller != null) {
+        await widget.controller!.addStroke(stroke);
+      } else {
+        await AppData.insertAnnotationStroke(stroke);
+      }
+    } catch (e) {
+      debugPrint('Error guardando anotación: $e');
+      if (mounted) {
+        setState(() => _strokes =
+            List.unmodifiable(_strokes.where((s) => s.id != stroke.id)));
+        ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+          const SnackBar(content: Text('No se pudo guardar la anotación')),
+        );
+      }
+    }
   }
 
   Future<void> _commitStroke(List<Offset> pointsNorm) async {
@@ -202,7 +264,6 @@ class _AnnotationLayerState extends State<AnnotationLayer> {
     final stroke = AnnotationStroke(
       id: AppData.newId(prefix: 'stk'),
       docId: widget.docId,
-      setlistId: widget.setlistId,
       pageIndex: widget.pageIndex,
       tool: widget.tool,
       width: widget.width,
@@ -210,22 +271,19 @@ class _AnnotationLayerState extends State<AnnotationLayer> {
       pointsNorm: pointsNorm,
       createdAtMs: DateTime.now().millisecondsSinceEpoch,
     );
-
-    // Delegate to Global Controller (handles DB + History)
-    if (widget.controller != null) {
-      await widget.controller!.addStroke(stroke);
-    } else {
-      // Fallback for no controller (shouldn't happen in app)
-      await AppData.insertAnnotationStroke(stroke);
-      if (mounted) setState(() => _strokes.add(stroke));
-    }
+    await _persist(stroke);
   }
-  
-  // Undo/Redo/Clear are now handled by controller calling _load() via stream
-
 
   Offset _normalize(Offset local, Size size) {
-    return Offset(local.dx / size.width, local.dy / size.height);
+    return Offset(
+      (local.dx / size.width).clamp(0.0, 1.0),
+      (local.dy / size.height).clamp(0.0, 1.0),
+    );
+  }
+
+  void _addDraftPoint(Offset p) {
+    _draftPoints!.add(p);
+    _draftRevision++;
   }
   
   bool get _isTextOrStamp => widget.tool == AnnotationTool.text || widget.tool == AnnotationTool.stamp;
@@ -238,22 +296,27 @@ class _AnnotationLayerState extends State<AnnotationLayer> {
       builder: (context, constraints) {
         final size = Size(constraints.maxWidth, constraints.maxHeight);
         
-        Widget painted = CustomPaint(
-          painter: _AnnotationPainter(
-            strokes: _strokes,
-            draftPoints: _draftPoints,
-            draftTool: widget.tool,
-            draftWidth: widget.width,
-            draftColor: widget.color,
-            pageSize: widget.pageSize,
+        Widget painted = RepaintBoundary(
+          child: CustomPaint(
+            painter: _AnnotationPainter(
+              strokes: _strokes,
+              draftPoints: _draftPoints,
+              draftRevision: _draftRevision,
+              draftTool: widget.tool,
+              draftWidth: widget.width,
+              draftColor: widget.color,
+              pageSize: widget.pageSize,
+            ),
+            size: Size.infinite,
           ),
-          size: Size.infinite,
         );
         
         if (displayOnly) {
            return IgnorePointer(child: painted);
         }
-        // Standard Listener - always gets events, non-competitive
+        // Standard Listener - always gets events, non-competitive.
+        // Nota: en modo edición la capa captura los toques (no hay pinch-zoom
+        // sobre la página); con 2+ dedos se cancela el trazo en curso.
         return Listener(
           behavior: HitTestBehavior.opaque,
           onPointerDown: (e) {
@@ -266,23 +329,24 @@ class _AnnotationLayerState extends State<AnnotationLayer> {
              } else {
                 _allowDrawing = true;
                 if (_isStrokeTool) {
-                   _draftPoints = <Offset>[_normalize(e.localPosition, size)];
-                   setState(() {});
+                   setState(() {
+                     _draftPoints = <Offset>[_normalize(e.localPosition, size)];
+                     _draftRevision++;
+                   });
                 }
              }
           },
           onPointerMove: (e) {
              if (!_allowDrawing || !_isStrokeTool || _draftPoints == null) return;
-             final pts = _draftPoints!;
-             pts.add(_normalize(e.localPosition, size));
-             setState(() {});
+             setState(() => _addDraftPoint(_normalize(e.localPosition, size)));
           },
           onPointerUp: (e) {
              _activePointers.remove(e.pointer);
 
              if (_isStrokeTool && _draftPoints != null) {
-                 _commitStroke(List<Offset>.from(_draftPoints!));
+                 final points = List<Offset>.from(_draftPoints!);
                  setState(() => _draftPoints = null);
+                 _commitStroke(points);
              }
              
              if (_activePointers.isEmpty) {
@@ -318,40 +382,22 @@ class _AnnotationLayerState extends State<AnnotationLayer> {
     if (widget.tool == AnnotationTool.text) {
       final text = await showDialog<String>(
         context: context,
-        builder: (ctx) {
-           final ctrl = TextEditingController();
-           return AlertDialog(
-             title: const Text('Insertar Texto'),
-             content: TextField(
-               controller: ctrl,
-               autofocus: true,
-               decoration: const InputDecoration(hintText: 'Escribe aquí...'),
-               textCapitalization: TextCapitalization.sentences,
-             ),
-             actions: [
-               TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancelar')),
-               FilledButton(onPressed: () => Navigator.pop(ctx, ctrl.text), child: const Text('Insertar')),
-             ],
-           );
-        }
+        builder: (ctx) => const _InsertTextDialog(),
       );
       if (text != null && text.isNotEmpty) {
-        // Commit text
         await _commitItem(pos, text, widget.tool);
       }
     } else if (widget.tool == AnnotationTool.stamp) {
-        // For v1, we just cycle a default stamp or show a mini-picker?
-        // Let's use a default "Star" for now or a mini-dialog.
-        // Doing a quick mini-picker for demo.
         final stampId = await showDialog<String>(
           context: context,
           builder: (ctx) => SimpleDialog(
             title: const Text('Seleccionar Sello'),
             children: [
-               SimpleDialogOption(onPressed: () => Navigator.pop(ctx, 'coda'), child: const Icon(Icons.music_note, size: 32)),
-               SimpleDialogOption(onPressed: () => Navigator.pop(ctx, 'segno'), child: const Icon(Icons.repeat, size: 32)),
-               SimpleDialogOption(onPressed: () => Navigator.pop(ctx, 'warning'), child: const Icon(Icons.warning_amber_rounded, size: 32)),
-               SimpleDialogOption(onPressed: () => Navigator.pop(ctx, 'star'), child: const Icon(Icons.star, size: 32)),
+               for (final id in const ['coda', 'segno', 'warning', 'star'])
+                 SimpleDialogOption(
+                   onPressed: () => Navigator.pop(ctx, id),
+                   child: Icon(AnnotationStyle.stampIcon(id), size: 32),
+                 ),
             ],
           )
         );
@@ -365,7 +411,6 @@ class _AnnotationLayerState extends State<AnnotationLayer> {
     final stroke = AnnotationStroke(
       id: AppData.newId(prefix: 'stk'),
       docId: widget.docId,
-      setlistId: widget.setlistId,
       pageIndex: widget.pageIndex,
       tool: tool,
       width: 0, // Not used for text/stamp
@@ -374,21 +419,52 @@ class _AnnotationLayerState extends State<AnnotationLayer> {
       content: content,
       createdAtMs: DateTime.now().millisecondsSinceEpoch,
     );
-
-    if (widget.controller != null) {
-      await widget.controller!.addStroke(stroke);
-    } else {
-      await AppData.insertAnnotationStroke(stroke);
-      if (mounted) setState(() => _strokes.add(stroke));
-    }
+    if (!mounted) return;
+    await _persist(stroke);
   }
 }
 
+/// Diálogo para insertar texto (dueño de su TextEditingController).
+class _InsertTextDialog extends StatefulWidget {
+  const _InsertTextDialog();
 
+  @override
+  State<_InsertTextDialog> createState() => _InsertTextDialogState();
+}
+
+class _InsertTextDialogState extends State<_InsertTextDialog> {
+  final _ctrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Insertar Texto'),
+      content: TextField(
+        controller: _ctrl,
+        autofocus: true,
+        decoration: const InputDecoration(hintText: 'Escribe aquí...'),
+        textCapitalization: TextCapitalization.sentences,
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
+        FilledButton(onPressed: () => Navigator.pop(context, _ctrl.text), child: const Text('Insertar')),
+      ],
+    );
+  }
+}
 
 class _AnnotationPainter extends CustomPainter {
   final List<AnnotationStroke> strokes;
   final List<Offset>? draftPoints;
+
+  /// Cambia con cada punto agregado al trazo en curso (la lista se muta).
+  final int draftRevision;
   final AnnotationTool? draftTool;
   final double? draftWidth;
   final Color? draftColor;
@@ -397,6 +473,7 @@ class _AnnotationPainter extends CustomPainter {
   _AnnotationPainter({
     required this.strokes,
     required this.draftPoints,
+    required this.draftRevision,
     this.draftTool,
     this.draftWidth,
     this.draftColor,
@@ -433,18 +510,19 @@ class _AnnotationPainter extends CustomPainter {
   }
 
   void _paintItem(Canvas canvas, Size size, AnnotationStroke s) {
+     final color = s.color ?? _defaultColorForTool(s.tool);
      switch (s.tool) {
        case AnnotationTool.text:
          if (s.pointsNorm.isEmpty) return;
-         _paintText(canvas, size, s.pointsNorm.first, s.content ?? '', s.color ?? Colors.black);
+         _paintText(canvas, size, s.pointsNorm.first, s.content ?? '', color);
          break;
        case AnnotationTool.stamp:
          if (s.pointsNorm.isEmpty) return;
-         _paintStamp(canvas, size, s.pointsNorm.first, s.content ?? '', s.color ?? Colors.red);
+         _paintStamp(canvas, size, s.pointsNorm.first, s.content ?? '', color);
          break;
-       default:
-         // Strokes (Pen, Highlighter, Whiteout)
-         final color = s.color ?? _defaultColorForTool(s.tool);
+       case AnnotationTool.pen:
+       case AnnotationTool.highlighter:
+       case AnnotationTool.whiteout:
          _paintStroke(canvas, size, s.tool, s.width, s.pointsNorm, color);
          break;
      }
@@ -465,18 +543,13 @@ class _AnnotationPainter extends CustomPainter {
 
     final paint = Paint()
       ..style = PaintingStyle.stroke
-      ..strokeWidth = width // Natural scaling (width zooms with page)
+      ..strokeWidth = width // En puntos de página: escala con el zoom
       ..strokeCap = StrokeCap.round
       ..strokeJoin = StrokeJoin.round
       ..isAntiAlias = true
       ..color = tool == AnnotationTool.highlighter
           ? color.withValues(alpha: AnnotationStyle.highlighterAlpha)  // Highlighter always semi-transparent
           : color;
-    
-    // Whiteout logic
-    if (tool == AnnotationTool.whiteout) {
-      paint.blendMode = BlendMode.srcOver; 
-    }
 
     final path = Path();
     final first = pointsNorm.first;
@@ -505,8 +578,12 @@ class _AnnotationPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _AnnotationPainter oldDelegate) {
-    return oldDelegate.strokes != strokes || 
-           oldDelegate.draftPoints != draftPoints ||
-           oldDelegate.pageSize != pageSize;
+    return !identical(oldDelegate.strokes, strokes) ||
+           !identical(oldDelegate.draftPoints, draftPoints) ||
+           oldDelegate.draftRevision != draftRevision ||
+           oldDelegate.pageSize != pageSize ||
+           oldDelegate.draftWidth != draftWidth ||
+           oldDelegate.draftColor != draftColor ||
+           oldDelegate.draftTool != draftTool;
   }
 }

@@ -3,6 +3,11 @@ import '../../models/annotation_stroke.dart';
 import '../app_database.dart'; // To access table data classes
 import '../app_data.dart';
 
+/// Acceso a las anotaciones (una capa global por documento).
+///
+/// Nota: la tabla conserva la columna `setlist_id` por compatibilidad con
+/// datos viejos, pero la app ya no crea ni muestra capas por setlist: todas
+/// las lecturas filtran `setlist_id IS NULL` y las escrituras lo dejan en null.
 class AnnotationRepository {
 
   /// Convierte una fila de Drift al modelo de dominio.
@@ -10,7 +15,6 @@ class AnnotationRepository {
     return AnnotationStroke.fromDbMap({
       'id': r.id,
       'doc_id': r.docId,
-      'setlist_id': r.setlistId,
       'page_index': r.pageIndex,
       'tool': r.tool,
       'width': r.width,
@@ -19,24 +23,22 @@ class AnnotationRepository {
     });
   }
 
-  /// Todos los trazos (capa global) de un documento, todas las páginas.
+  /// Todos los trazos de un documento, todas las páginas.
   static Future<List<AnnotationStroke>> getAnnotationStrokesForDoc(String docId) async {
     final rows = await AppData.db.getAnnotationStrokesForDoc(docId: docId);
     return rows.map(fromRow).toList();
   }
 
-  /// IDs de documentos que tienen anotaciones en la capa global.
+  /// IDs de documentos que tienen anotaciones.
   static Future<Set<String>> getAnnotatedDocIds() => AppData.db.getAnnotatedDocIds();
   
   static Future<List<AnnotationStroke>> getAnnotationStrokesForPage({
     required String docId, 
     required int pageIndex, 
-    String? setlistId
   }) async {
     final rows = await AppData.db.getAnnotationStrokes(
       docId: docId, 
       pageIndex: pageIndex, 
-      setlistId: setlistId
     );
     return rows.map(fromRow).toList();
   }
@@ -46,7 +48,7 @@ class AnnotationRepository {
       AnnotationStrokesTableCompanion(
         id: Value(s.id),
         docId: Value(s.docId),
-        setlistId: Value(s.setlistId),
+        setlistId: const Value(null),
         pageIndex: Value(s.pageIndex),
         tool: Value(s.toolName),
         width: Value(s.width),
@@ -63,12 +65,10 @@ class AnnotationRepository {
   static Future<void> deleteAnnotationStrokesForPage({
     required String docId, 
     required int pageIndex, 
-    String? setlistId
   }) async {
     await AppData.db.deleteAnnotationStrokesForPage(
       docId: docId, 
       pageIndex: pageIndex, 
-      setlistId: setlistId
     );
   }
 }

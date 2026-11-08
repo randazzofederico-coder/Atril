@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:ui';
 
+import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pdf_setlist/data/app_data.dart';
@@ -52,7 +53,6 @@ void main() {
     return AnnotationStroke(
       id: id,
       docId: 'd1',
-      setlistId: null,
       pageIndex: page,
       tool: tool,
       width: 3,
@@ -124,10 +124,10 @@ void main() {
   test('getAnnotatedDocIds solo considera la capa global', () async {
     await AnnotationRepository.insertAnnotationStroke(
         stroke('a', 1, AnnotationTool.pen));
-    await AnnotationRepository.insertAnnotationStroke(AnnotationStroke(
-      id: 'b', docId: 'd2', setlistId: 's1', pageIndex: 1,
-      tool: AnnotationTool.pen, width: 2,
-      pointsNorm: const [Offset(0, 0), Offset(1, 1)], createdAtMs: 1,
+    // Fila legacy de una capa por setlist (ya no se usa): no debe contarse.
+    await AppData.db.insertAnnotationStroke(AnnotationStrokesTableCompanion.insert(
+      id: 'b', docId: 'd2', setlistId: const Value('s1'), pageIndex: 1,
+      tool: 'pen', width: 2, pointsJson: '[[0,0],[1,1]]', createdAt: 1,
     ));
 
     final ids = await AnnotationRepository.getAnnotatedDocIds();

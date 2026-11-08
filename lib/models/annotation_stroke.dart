@@ -3,14 +3,12 @@ import 'dart:ui';
 
 /// Basic non-destructive PDF annotation model.
 ///
-/// Coordinates are stored NORMALIZED to the page viewport:
-/// - dx, dy in [0..1] relative to the rendered page area.
-/// This makes annotations stable across devices/resolutions.
+/// Coordinates are stored NORMALIZED to the PAGE:
+/// - dx, dy in [0..1] relative to the page area.
+/// This makes annotations stable across devices/resolutions/zoom.
 ///
-/// Notes:
-/// - v1 supports only freehand strokes (pen/highlighter).
-/// - v2 adds whiteout, text, and stamps.
-/// - Future: setlist-specific layer by setting [setlistId] non-null.
+/// Tools: pen, highlighter, whiteout (strokes) + text and stamps (points).
+/// Annotations belong to the document (one global layer per doc).
 enum AnnotationTool {
   pen,
   highlighter,
@@ -22,8 +20,7 @@ enum AnnotationTool {
 class AnnotationStroke {
   final String id;
   final String docId;
-  final String? setlistId;
-  final int pageIndex; // 1-based, consistent with PdfViewPinch
+  final int pageIndex; // 1-based (pdfrx pageNumber)
   final AnnotationTool tool;
   final double width;
   
@@ -39,7 +36,6 @@ class AnnotationStroke {
   const AnnotationStroke({
     required this.id,
     required this.docId,
-    required this.setlistId,
     required this.pageIndex,
     required this.tool,
     required this.width,
@@ -62,7 +58,6 @@ class AnnotationStroke {
     return {
       'id': id,
       'doc_id': docId,
-      'setlist_id': setlistId,
       'page_index': pageIndex,
       'tool': toolName,
       'width': width,
@@ -114,7 +109,6 @@ class AnnotationStroke {
     return AnnotationStroke(
       id: row['id'] as String,
       docId: row['doc_id'] as String,
-      setlistId: row['setlist_id'] as String?,
       pageIndex: (row['page_index'] as int),
       tool: tool,
       width: (row['width'] as num).toDouble(),

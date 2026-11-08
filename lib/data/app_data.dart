@@ -451,8 +451,8 @@ class AppData {
       ExportManager.instance.importSetlistFile(filePath);
 
   // --- ANNOTATION REPOSITORY ---
-  static Future<List<AnnotationStroke>> getAnnotationStrokesForPage({required String docId, required int pageIndex, String? setlistId}) =>
-      AnnotationRepository.getAnnotationStrokesForPage(docId: docId, pageIndex: pageIndex, setlistId: setlistId);
+  static Future<List<AnnotationStroke>> getAnnotationStrokesForPage({required String docId, required int pageIndex}) =>
+      AnnotationRepository.getAnnotationStrokesForPage(docId: docId, pageIndex: pageIndex);
 
   static Future<void> insertAnnotationStroke(AnnotationStroke s) =>
       AnnotationRepository.insertAnnotationStroke(s);
@@ -460,8 +460,8 @@ class AppData {
   static Future<void> deleteAnnotationStroke(String id) =>
       AnnotationRepository.deleteAnnotationStroke(id);
 
-  static Future<void> deleteAnnotationStrokesForPage({required String docId, required int pageIndex, String? setlistId}) =>
-      AnnotationRepository.deleteAnnotationStrokesForPage(docId: docId, pageIndex: pageIndex, setlistId: setlistId);
+  static Future<void> deleteAnnotationStrokesForPage({required String docId, required int pageIndex}) =>
+      AnnotationRepository.deleteAnnotationStrokesForPage(docId: docId, pageIndex: pageIndex);
 
   // --- PDF UTILS (Delegated to LibraryRepository) ---
   static Future<int> getPagesCountForPath(String path) => LibraryRepository.getPagesCountForPath(path);

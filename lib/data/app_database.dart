@@ -371,42 +371,35 @@ class AppDatabase extends _$AppDatabase {
   // ---------------------------------------------------------------------------
   // Annotations
   // ---------------------------------------------------------------------------
+  //
+  // Una capa global por documento. La columna `setlist_id` se conserva por
+  // compatibilidad con datos viejos, pero la app ya no crea capas por setlist:
+  // las lecturas "visibles" filtran `setlist_id IS NULL`. Las operaciones de
+  // mantenimiento (remap, borrar, deshacer) actúan sobre todas las filas del
+  // documento para no dejar huérfanos.
 
   Future<List<AnnotationStrokesTableData>> getAnnotationStrokes({
     required String docId,
     required int pageIndex,
-    String? setlistId,
   }) {
-    // Basic query
-    var query = select(annotationStrokesTable)..where((t) => t.docId.equals(docId) & t.pageIndex.equals(pageIndex));
-    
-    if (setlistId == null) {
-      query = query..where((t) => t.setlistId.isNull());
-    } else {
-      query = query..where((t) => t.setlistId.equals(setlistId));
-    }
-    
-    return (query..orderBy([(t) => OrderingTerm.asc(t.createdAt)])).get();
+    final query = select(annotationStrokesTable)
+      ..where((t) =>
+          t.docId.equals(docId) & t.pageIndex.equals(pageIndex) & t.setlistId.isNull())
+      ..orderBy([(t) => OrderingTerm.asc(t.createdAt)]);
+    return query.get();
   }
 
-  /// Todos los trazos de un documento (todas las páginas), ordenados por creación.
-  /// Por defecto solo la capa global (setlistId = null).
+  /// Todos los trazos visibles de un documento (todas las páginas).
   Future<List<AnnotationStrokesTableData>> getAnnotationStrokesForDoc({
     required String docId,
-    String? setlistId,
   }) {
-    var query = select(annotationStrokesTable)..where((t) => t.docId.equals(docId));
-    if (setlistId == null) {
-      query = query..where((t) => t.setlistId.isNull());
-    } else {
-      query = query..where((t) => t.setlistId.equals(setlistId));
-    }
-    return (query
-          ..orderBy([
-            (t) => OrderingTerm.asc(t.pageIndex),
-            (t) => OrderingTerm.asc(t.createdAt),
-          ]))
-        .get();
+    final query = select(annotationStrokesTable)
+      ..where((t) => t.docId.equals(docId) & t.setlistId.isNull())
+      ..orderBy([
+        (t) => OrderingTerm.asc(t.pageIndex),
+        (t) => OrderingTerm.asc(t.createdAt),
+      ]);
+    return query.get();
   }
 
   /// Todos los trazos de la DB (usado al importar/mergear backups).
@@ -414,7 +407,7 @@ class AppDatabase extends _$AppDatabase {
     return select(annotationStrokesTable).get();
   }
 
-  /// Todos los trazos de un documento en TODAS las capas (global + setlists).
+  /// Todas las filas de un documento (incluidas capas legacy por setlist).
   Future<List<AnnotationStrokesTableData>> getAllAnnotationStrokesForDocAllLayers(String docId) {
     return (select(annotationStrokesTable)..where((t) => t.docId.equals(docId))).get();
   }
@@ -423,7 +416,7 @@ class AppDatabase extends _$AppDatabase {
   ///
   /// [pageMapping]: página vieja (1-based) → página nueva (1-based).
   /// Los trazos de páginas que no figuran en el mapa (páginas eliminadas)
-  /// se borran. Aplica a todas las capas. Atómico (transacción).
+  /// se borran. Atómico (transacción).
   Future<void> remapAnnotationPages(String docId, Map<int, int> pageMapping) async {
     await transaction(() async {
       final rows = await getAllAnnotationStrokesForDocAllLayers(docId);
@@ -449,7 +442,12 @@ class AppDatabase extends _$AppDatabase {
     });
   }
 
-  /// IDs de documentos que tienen al menos una anotación en la capa global.
+  /// Borra todas las anotaciones de un documento (al purgarlo definitivamente).
+  Future<void> deleteAnnotationsForDoc(String docId) async {
+    await (delete(annotationStrokesTable)..where((t) => t.docId.equals(docId))).go();
+  }
+
+  /// IDs de documentos que tienen al menos una anotación visible.
   Future<Set<String>> getAnnotatedDocIds() async {
     final query = selectOnly(annotationStrokesTable, distinct: true)
       ..addColumns([annotationStrokesTable.docId])
@@ -472,17 +470,11 @@ class AppDatabase extends _$AppDatabase {
   Future<void> deleteAnnotationStrokesForPage({
     required String docId,
     required int pageIndex,
-    String? setlistId,
   }) async {
-    var query = delete(annotationStrokesTable)..where((t) => t.docId.equals(docId) & t.pageIndex.equals(pageIndex));
-    
-    if (setlistId == null) {
-      query = query..where((t) => t.setlistId.isNull());
-    } else {
-      query = query..where((t) => t.setlistId.equals(setlistId));
-    }
-    
-    await query.go();
+    await (delete(annotationStrokesTable)
+          ..where((t) =>
+              t.docId.equals(docId) & t.pageIndex.equals(pageIndex) & t.setlistId.isNull()))
+        .go();
   }
 
   // ---------------------------------------------------------------------------

@@ -38,11 +38,10 @@ void main() {
     });
     tearDown(() async => AppData.db.close());
 
-    Future<void> add(String id, String docId, int page, {String? setlistId}) {
+    Future<void> add(String id, String docId, int page) {
       return AnnotationRepository.insertAnnotationStroke(AnnotationStroke(
         id: id,
         docId: docId,
-        setlistId: setlistId,
         pageIndex: page,
         tool: AnnotationTool.pen,
         width: 2,
@@ -59,7 +58,7 @@ void main() {
     test('las anotaciones siguen a sus páginas y se borran con las eliminadas', () async {
       await add('a', 'd1', 1);
       await add('b', 'd1', 2);
-      await add('c', 'd1', 3, setlistId: 's1'); // capa de setlist también se mueve
+      await add('c', 'd1', 3);
       await add('d', 'd1', 4);
       await add('other', 'd2', 2); // otro documento: no se toca
 
