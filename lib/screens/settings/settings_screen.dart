@@ -315,10 +315,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     setState(() => _loading = true);
     try {
-      await BackupManager.instance.importBackup(context, result.files.single.path!);
+      final report = await BackupManager.instance.importBackup(result.files.single.path!);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Contenido, importado en carpeta "Backup Importado".')),
+          SnackBar(content: Text('${report.summary} (carpeta "Backup Importado")')),
         );
       }
     } catch (e) {

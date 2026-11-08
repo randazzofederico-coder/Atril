@@ -57,7 +57,7 @@ class _HomeShellState extends State<HomeShell> {
       await _importSetlistFile(path);
     } else if (fileType == 'atril' || ext == '.atril') {
       if (!mounted) return;
-      await BackupManager.instance.importBackup(context, path);
+      await _importReceivedBackup(path);
     } else {
       debugPrint('[HomeShell] Tipo no reconocido (ext: $ext)');
       if (!mounted) return;
@@ -85,9 +85,18 @@ class _HomeShellState extends State<HomeShell> {
       }
 
       // Es un ZIP — verificar si contiene data.json (= setlist)
-      final archive = ZipDecoder().decodeBuffer(InputFileStream(path));
-      for (final entry in archive) {
-        if (entry.name == 'data.json') return 'setlist';
+      final input = InputFileStream(path);
+      try {
+        final archive = ZipDecoder().decodeBuffer(input);
+        var hasDb = false;
+        for (final entry in archive) {
+          if (entry.name == 'data.json') return 'setlist';
+          if (entry.name == 'atril.sqlite') hasDb = true;
+        }
+        // Solo es un backup si trae la base de datos de Atril
+        if (!hasDb) return null;
+      } finally {
+        input.close();
       }
 
       // Es un ZIP pero sin data.json — podría ser un .atril backup
@@ -95,6 +104,34 @@ class _HomeShellState extends State<HomeShell> {
     } catch (e) {
       debugPrint('[HomeShell] Error detectando tipo: $e');
       return null;
+    }
+  }
+
+  /// Backup .atril recibido desde otra app: se confirma antes de importar.
+  Future<void> _importReceivedBackup(String path) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Importar backup'),
+        content: const Text(
+          'Se va a agregar el contenido de este backup a tu biblioteca, en una '
+          'carpeta nueva "Backup Importado". No se borra ni reemplaza nada.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Importar')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final report = await BackupManager.instance.importBackup(path);
+      messenger.showSnackBar(SnackBar(content: Text(report.summary)));
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(content: Text('Error importando backup: $e'), backgroundColor: Colors.red),
+      );
     }
   }
 

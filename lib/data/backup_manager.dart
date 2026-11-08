@@ -299,163 +299,131 @@ class BackupManager {
     }
   }
 
-  Future<void> importBackup(BuildContext context, String sourcePath) async {
+  /// Agrega el contenido de un backup .atril a la biblioteca actual (sin
+  /// reemplazar nada) dentro de una carpeta "Backup Importado (fecha)".
+  ///
+  /// - Todas las escrituras de DB van en una transacción: si algo falla no
+  ///   queda una importación a medias, y los PDFs ya copiados se borran.
+  /// - Importa carpetas, partituras (incluidas las de la papelera),
+  ///   anotaciones y setlists.
+  /// - Devuelve un resumen; lanza si la importación falla.
+  Future<ImportBackupReport> importBackup(String sourcePath) async {
+    final tempDir = await getTemporaryDirectory();
+    final extractDir = Directory(p.join(tempDir.path, 'import_extraction_${DateTime.now().millisecondsSinceEpoch}'));
+    final copiedFiles = <File>[];
+
     try {
-       AppData.backgroundTaskProgress.value = const BackgroundTaskStatus(0.0, 'Preparando Importación...');
+      AppData.backgroundTaskProgress.value = const BackgroundTaskStatus(0.0, 'Preparando importación...');
+      await extractDir.create(recursive: true);
 
-       // 1. Unzip en Isolate (Evita OOM)
-       final tempDir = await getTemporaryDirectory();
-       final extractDirName = 'import_extraction_${DateTime.now().millisecondsSinceEpoch}';
-       final extractDir = Directory(p.join(tempDir.path, extractDirName));
-       await extractDir.create(recursive: true);
+      // 1. Unzip en Isolate (Evita OOM)
+      final receivePort = ReceivePort();
+      await Isolate.spawn(
+        _unzipWorker,
+        _UnzipWorkerArgs(zipPath: sourcePath, destPath: extractDir.path, sendPort: receivePort.sendPort),
+        onError: receivePort.sendPort,
+        onExit: receivePort.sendPort,
+      );
+      await _listenWorker(receivePort, 'Descomprimiendo backup...');
 
-       final receivePort = ReceivePort();
-       await Isolate.spawn(
-          _unzipWorker, 
-          _UnzipWorkerArgs(
-            zipPath: sourcePath, 
-            destPath: extractDir.path, 
-            sendPort: receivePort.sendPort
-          )
-       );
+      // 2. Abrir y validar la DB del backup
+      final dbFile = File(p.join(extractDir.path, 'atril.sqlite'));
+      if (!await dbFile.exists()) throw Exception("Backup inválido (falta la base de datos).");
+      await _validateBackupDb(dbFile);
 
-       await for (final message in receivePort) {
-          if (message is double) {
-             AppData.backgroundTaskProgress.value = BackgroundTaskStatus(message, 'Descomprimiendo backup...');
-          } else if (message == 'DONE') {
-             break;
-          } else if (message is String && message.startsWith('ERROR:')) {
-             throw Exception(message);
-          }
-       }
-       
-       AppData.backgroundTaskProgress.value = const BackgroundTaskStatus(1.0, 'Procesando datos...');
+      AppData.backgroundTaskProgress.value = const BackgroundTaskStatus(0.0, 'Procesando datos...');
 
-       // 2. Open External DB
-       final dbPath = p.join(extractDir.path, 'atril.sqlite');
-       if (!await File(dbPath).exists()) throw Exception("Backup inválido (falta DB).");
-       
-       final externalDb = AppDatabase(executor: NativeDatabase(File(dbPath)));
-
-       try {
-        // 3. Crear Carpeta Raíz de Importación
-        final dateStr = DateFormat('yyyy-MM-dd HH:mm').format(DateTime.now());
-        final rootImportId = AppData.newFolderId();
-        await AppData.db.createFolder(
-          id: rootImportId,
-          name: "Backup Importado ($dateStr)",
-          parentId: null, // Raíz
-          position: 999, // Al final
-        );
-
-        // 4. Leer todo del backup
+      final externalDb = AppDatabase(executor: NativeDatabase(dbFile));
+      try {
         final extFolders = await externalDb.getAllFolders();
         final extDocs = await externalDb.getAllDocs();
-        
-        final idMap = <String, String>{};
-        idMap['root'] = rootImportId;
-        
-        // 5. Migrar Carpetas
-        for (final f in extFolders) {
-          if (f.id == 'root') continue;
-          
-          final newId = AppData.newFolderId();
-          idMap[f.id] = newId;
+        final extStrokes = await externalDb.getAllAnnotationStrokes();
+        final extSetlists = await externalDb.getAllSetlists();
+        final extItems = await externalDb.getAllSetlistItemsOrdered();
 
-          await AppData.db.createFolder(
-            id: newId,
-            name: f.name,
-            parentId: rootImportId,
-            position: f.position,
-            isDeleted: f.isDeleted,
-            deletedAt: f.deletedAt,
-          );
-        }
-
-        for (final f in extFolders) {
-            if (f.id == 'root') continue;
-
-            String? targetParentId;
-            if (f.parentId == null) {
-              targetParentId = rootImportId;
-            } else {
-              targetParentId = idMap[f.parentId];
-              targetParentId ??= rootImportId;
-            }
-
-            if (targetParentId != rootImportId) {
-               final newId = idMap[f.id]!;
-               await AppData.db.upsertFolder(
-                 id: newId,
-                 name: f.name,
-                 parentId: targetParentId,
-                 position: f.position,
-                 isDeleted: f.isDeleted,
-                 deletedAt: f.deletedAt,
-               );
-            }
-        }
-
-        // 6. Migrar Documentos
         final docsDir = await AppData.storage.getDocsDir();
-        
-        int docCount = 0;
-        final totalDocs = extDocs.length;
+        final dateStr = DateFormat('yyyy-MM-dd HH:mm').format(DateTime.now());
+        final rootImportId = AppData.newFolderId();
+
+        // 3. Copiar PDFs primero (fuera de la transacción). Se registra cada
+        //    copia para poder borrarla si la transacción falla.
         final docIdMap = <String, String>{}; // id en backup -> id nuevo
+        final newRelPath = <String, String>{};
+        var missingFiles = 0;
+        for (var i = 0; i < extDocs.length; i++) {
+          final d = extDocs[i];
+          AppData.backgroundTaskProgress.value = BackgroundTaskStatus(
+            (i + 1) / extDocs.length, 'Copiando PDFs (${i + 1}/${extDocs.length})...');
 
-        for (final d in extDocs) {
-          docCount++;
-          AppData.backgroundTaskProgress.value = BackgroundTaskStatus(docCount / totalDocs, 'Importando PDFs ($docCount/$totalDocs)...');
-          
+          final source = await _findBackupPdf(extractDir, d.internalRelPath);
+          if (source == null) {
+            missingFiles++;
+            debugPrint("Advertencia: PDF no encontrado en el backup para '${d.displayName}'");
+            continue;
+          }
           final newDocId = AppData.newDocId();
-          
-          // Debug Path Construction
-          var internalPath = d.internalRelPath;
-          // Sanitizar separadores por si acaso vienen de Windows
-          internalPath = internalPath.replaceAll('\\', '/');
-          
-          var backupFile = File(p.join(extractDir.path, internalPath));
-          
-          if (!await backupFile.exists()) {
-             // Fallback: Check inside 'docs' folder explicitly
-             final retryFile = File(p.join(extractDir.path, 'docs', p.basename(internalPath)));
-             if (await retryFile.exists()) {
-                debugPrint("Info: Archivo encontrado en subcarpeta docs/ (Fallback): ${retryFile.path}");
-                backupFile = retryFile;
-             } else {
-                debugPrint("Warning: PDF NO ENCONTRADO. Buscado en:\n 1. ${backupFile.path}\n 2. ${retryFile.path}");
-             }
-          }
-          
-          if (await backupFile.exists()) {
-             final newFilename = '$newDocId.pdf';
-             final destFile = File(p.join(docsDir.path, newFilename));
-             
-             await backupFile.copy(destFile.path);
-             docIdMap[d.id] = newDocId;
-
-             String? newFolderId = rootImportId;
-             if (d.folderId != null) {
-               newFolderId = idMap[d.folderId] ?? rootImportId;
-             }
-
-             await AppData.db.upsertDoc(
-               id: newDocId,
-               displayName: d.displayName,
-               author: d.author ?? '',
-               internalRelPath: p.join('docs', newFilename), // Corregido: Debe incluir 'docs/'
-               folderId: newFolderId,
-               isDeleted: d.isDeleted,
-               deletedAt: d.deletedAt,
-             );
-          } else {
-            debugPrint("Advertencia: Archivo PDF no encontrado irrecuperable para doc ${d.displayName}");
-          }
+          final newFilename = '$newDocId.pdf';
+          final dest = File(p.join(docsDir.path, newFilename));
+          await source.copy(dest.path);
+          copiedFiles.add(dest);
+          docIdMap[d.id] = newDocId;
+          newRelPath[d.id] = p.join('docs', newFilename);
         }
-        
-        // 7. Migrar anotaciones de los documentos importados
-        try {
-          final extStrokes = await externalDb.getAllAnnotationStrokes();
+
+        // 4. Escrituras de DB en una sola transacción
+        AppData.backgroundTaskProgress.value = const BackgroundTaskStatus(1.0, 'Guardando en la biblioteca...');
+        var annotations = 0;
+        var setlists = 0;
+        await AppData.db.transaction(() async {
+          await AppData.db.createFolder(
+            id: rootImportId,
+            name: "Backup Importado ($dateStr)",
+            parentId: null, // Raíz
+            position: 999, // Al final
+          );
+
+          // Carpetas: primero IDs, luego padres (el orden de lectura no
+          // garantiza que el padre venga antes que el hijo).
+          final folderIdMap = <String, String>{'root': rootImportId};
+          final parentOf = <String, String>{};
+          for (final f in extFolders) {
+            if (f.id == 'root') continue;
+            folderIdMap[f.id] = AppData.newFolderId();
+          }
+          for (final f in extFolders) {
+            if (f.id == 'root') continue;
+            final parent = f.parentId == null ? rootImportId : (folderIdMap[f.parentId] ?? rootImportId);
+            await AppData.db.createFolder(
+              id: folderIdMap[f.id]!,
+              name: f.name,
+              parentId: null, // se asigna abajo (evita FK a carpetas aún no creadas)
+              position: f.position,
+              isDeleted: f.isDeleted,
+              deletedAt: f.deletedAt,
+            );
+            parentOf[f.id] = parent;
+          }
+          for (final f in extFolders) {
+            if (f.id == 'root') continue;
+            await AppData.db.setFolderParent(folderIdMap[f.id]!, parentOf[f.id]);
+          }
+
+          // Partituras
+          for (final d in extDocs) {
+            final newDocId = docIdMap[d.id];
+            if (newDocId == null) continue;
+            await AppData.db.upsertDoc(
+              id: newDocId,
+              displayName: d.displayName,
+              author: d.author ?? '',
+              internalRelPath: newRelPath[d.id]!,
+              folderId: d.folderId == null ? rootImportId : (folderIdMap[d.folderId] ?? rootImportId),
+              isDeleted: d.isDeleted,
+              deletedAt: d.deletedAt,
+            );
+          }
+
+          // Anotaciones (capa global)
           for (final s in extStrokes) {
             final newDocId = docIdMap[s.docId];
             if (newDocId == null) continue;
@@ -472,37 +440,77 @@ class BackupManager {
                 createdAt: s.createdAt,
               ),
             );
+            annotations++;
           }
-        } catch (e) {
-          debugPrint("Warning: no se pudieron migrar anotaciones del backup: $e");
-        }
 
+          // Setlists (con nombre único)
+          final itemsBySetlist = <String, List<String>>{};
+          for (final it in extItems) {
+            final newDocId = docIdMap[it.docId];
+            if (newDocId == null) continue;
+            itemsBySetlist.putIfAbsent(it.setlistId, () => <String>[]).add(newDocId);
+          }
+          final usedNames = AppData.setlists.map((s) => s.name.toLowerCase()).toSet();
+          for (final s in extSetlists) {
+            var name = s.name;
+            var n = 2;
+            while (usedNames.contains(name.toLowerCase())) {
+              name = '${s.name} ($n)';
+              n++;
+            }
+            usedNames.add(name.toLowerCase());
+            final newId = AppData.newSetlistId();
+            await AppData.db.upsertSetlist(id: newId, name: name, notes: s.notes);
+            await AppData.db.replaceSetlistItems(
+              setlistId: newId,
+              orderedDocIds: (itemsBySetlist[s.id] ?? const <String>[]).toSet().toList(),
+            );
+            setlists++;
+          }
+        });
+
+        copiedFiles.clear(); // la transacción se confirmó: los PDFs se quedan
         await AppData.refreshLibrary();
-        debugPrint("Importación finalizada con éxito.");
 
+        return ImportBackupReport(
+          docs: docIdMap.length,
+          missingFiles: missingFiles,
+          annotations: annotations,
+          setlists: setlists,
+        );
       } finally {
         await externalDb.close();
       }
-       
-       AppData.backgroundTaskProgress.value = null;
-
     } catch (e) {
-      AppData.backgroundTaskProgress.value = null;
-      debugPrint("Error importing backup: $e");
-       if (context.mounted) {
-         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+      debugPrint("Error importando backup: $e");
+      // Rollback de archivos copiados si la DB no se confirmó
+      for (final f in copiedFiles) {
+        try { if (await f.exists()) await f.delete(); } catch (_) {}
       }
+      rethrow;
     } finally {
-        final tempDir = await getTemporaryDirectory();
-        try {
-           final list = tempDir.listSync();
-           for (final f in list) {
-             if (f is Directory && p.basename(f.path).startsWith('import_extraction_')) {
-               try { await f.delete(recursive: true); } catch(_) {}
-             }
-           }
-        } catch (_) {}
+      AppData.backgroundTaskProgress.value = null;
+      if (await extractDir.exists()) {
+        try { await extractDir.delete(recursive: true); } catch (_) {}
+      }
     }
+  }
+
+  /// Busca el PDF de un doc dentro del backup extraído (ruta guardada o
+  /// fallback a docs/<basename>). Nunca sale del directorio extraído.
+  Future<File?> _findBackupPdf(Directory extractDir, String internalRelPath) async {
+    final root = p.normalize(p.absolute(extractDir.path));
+    final rel = internalRelPath.replaceAll('\\', '/');
+    final candidates = [
+      p.normalize(p.join(root, rel)),
+      p.normalize(p.join(root, 'docs', p.basename(rel))),
+    ];
+    for (final c in candidates) {
+      if (!p.isWithin(root, c)) continue;
+      final f = File(c);
+      if (await f.exists()) return f;
+    }
+    return null;
   }
 
   /// Exporta la biblioteca como un ZIP legible para PC.
@@ -623,6 +631,29 @@ class BackupManager {
 
   String _sanitizeFilename(String name) {
     return name.replaceAll(RegExp(r'[<>:"/\\|?*]'), '_');
+  }
+}
+
+/// Resumen de una importación de backup (merge).
+class ImportBackupReport {
+  final int docs;
+  final int missingFiles;
+  final int annotations;
+  final int setlists;
+  const ImportBackupReport({
+    required this.docs,
+    required this.missingFiles,
+    required this.annotations,
+    required this.setlists,
+  });
+
+  String get summary {
+    final parts = <String>['$docs partitura(s)'];
+    if (annotations > 0) parts.add('$annotations anotación(es)');
+    if (setlists > 0) parts.add('$setlists setlist(s)');
+    var s = 'Importado: ${parts.join(', ')}.';
+    if (missingFiles > 0) s += ' $missingFiles PDF(s) no estaban en el backup.';
+    return s;
   }
 }
 
