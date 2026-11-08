@@ -4,7 +4,7 @@ import 'dart:isolate'; // Worker
 import 'package:archive/archive_io.dart';
 import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
-import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:intl/intl.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
@@ -515,10 +515,11 @@ class BackupManager {
 
   /// Exporta la biblioteca como un ZIP legible para PC.
   ///
-  /// Si [includeAnnotations] es 	rue, los PDFs con anotaciones se exportan
+  /// Si [includeAnnotations] es `true`, los PDFs con anotaciones se exportan
   /// con las anotaciones aplicadas (copias temporales; los originales no se
   /// modifican).
-  Future<void> exportLibraryToZip(BuildContext context, {bool includeAnnotations = false}) async {
+  /// Lanza una excepción si algo falla (la UI decide cómo mostrarla).
+  Future<void> exportLibraryToZip({bool includeAnnotations = false}) async {
     Directory? workDir;
     try {
       // 1. Preparar destino
@@ -621,9 +622,7 @@ class BackupManager {
     } catch (e) {
       AppData.backgroundTaskProgress.value = null;
       debugPrint('Error exportando biblioteca: $e');
-      if (context.mounted) {
-         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
-      }
+      rethrow;
     } finally {
       await ExportManager.instance.deleteDirQuietly(workDir);
     }

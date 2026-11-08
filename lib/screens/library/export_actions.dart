@@ -78,8 +78,7 @@ class ExportActions {
       if (choice == null) return false;
       include = choice;
     }
-    if (!context.mounted) return false;
-    await BackupManager.instance.exportLibraryToZip(context, includeAnnotations: include);
+    await BackupManager.instance.exportLibraryToZip(includeAnnotations: include);
     return true;
   }
 }
