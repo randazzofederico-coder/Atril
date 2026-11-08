@@ -1,9 +1,10 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:syncfusion_flutter_pdf/pdf.dart';
-import '../../models/setlist.dart';
 import '../../models/score.dart';
 import '../../models/folder.dart';
 import '../app_data.dart';
+import '../app_database.dart';
 import 'page_edit_repository.dart';
 
 class LibraryRepository {
@@ -237,6 +238,12 @@ class LibraryRepository {
 
   // --- RESTORE ---
 
+  /// Restaura documentos y carpetas de la papelera.
+  ///
+  /// Si el contenedor de un elemento sigue en la papelera (o ya no existe),
+  /// el elemento se restaura en la RAÍZ. Así nunca queda "colgando" de una
+  /// carpeta oculta (y nunca se purga junto con ella más tarde).
+  /// Todo ocurre en una transacción.
   static Future<void> restoreItems({
     required List<String> docIds, 
     required List<String> folderIds,
@@ -248,17 +255,35 @@ class LibraryRepository {
       if (onProgress != null) onProgress(count);
     }
 
-    for (final id in docIds) {
-      await AppData.db.restoreDoc(id);
-      tick();
-    }
-    for (final id in folderIds) {
-      await _restoreFolderRecursive(id, onProgress: tick);
-    }
+    await AppData.db.transaction(() async {
+      for (final id in folderIds) {
+        await _restoreFolderRecursive(id, onProgress: tick);
+        final folder = await AppData.db.getFolderById(id);
+        if (folder != null && !await _isFolderVisible(folder.parentId)) {
+          await AppData.db.setFolderParent(id, null);
+        }
+      }
+      for (final id in docIds) {
+        final doc = await AppData.db.getDocById(id);
+        if (doc == null) continue;
+        await AppData.db.restoreDoc(id);
+        if (!await _isFolderVisible(doc.folderId)) {
+          await AppData.db.setDocFolder(id, 'root');
+        }
+        tick();
+      }
+    });
+  }
+
+  /// `true` si la carpeta existe y no está en la papelera (o es la raíz).
+  static Future<bool> _isFolderVisible(String? folderId) async {
+    if (folderId == null || folderId == 'root') return true;
+    final f = await AppData.db.getFolderById(folderId);
+    return f != null && !f.isDeleted;
   }
 
   static Future<void> _restoreFolderRecursive(String folderId, {required Function() onProgress}) async {
-    // Need to restoration based on what's in DB because memory currentLibrary only has non-deleted
+    // Se restaura según la DB, porque la memoria solo tiene lo no borrado.
     final dbFolders = await AppData.db.getDeletedFolders();
     final childrenF = dbFolders.where((f) => f.parentId == folderId).toList();
     for (final child in childrenF) {
@@ -275,73 +300,106 @@ class LibraryRepository {
     onProgress();
   }
 
-  // --- PERMANENT DELETE ---
+  // --- PERMANENT DELETE (PURGA) ---
 
+  /// Elimina definitivamente elementos de la papelera.
+  ///
+  /// Reglas de seguridad:
+  /// - Solo se purgan documentos que ESTÁN en la papelera. Un documento activo
+  ///   nunca se borra, aunque se pida explícitamente.
+  /// - Al purgar una carpeta, los documentos o subcarpetas ACTIVOS que tenga
+  ///   adentro se rescatan a la raíz en lugar de borrarse.
+  /// - La carpeta raíz nunca se purga.
+  /// - Las filas de DB se borran en una transacción; los archivos PDF se
+  ///   borran recién después del commit.
   static Future<void> permanentlyDeleteItems({
     required List<String> docIds,
     required List<String> folderIds,
     Function(int)? onProgress,
   }) async {
-     int count = 0;
-     void tick() {
+    int count = 0;
+    void tick() {
       count++;
       if (onProgress != null) onProgress(count);
     }
 
-    for (final id in docIds) {
-      await permanentlyDeleteScore(id);
-      tick();
-    }
-    
-    // For folders, we need to find all scores inside before deleting
-    for (final fId in folderIds) {
-       await _permanentlyDeleteFolderRecursive(fId, onProgress: tick);
-    }
+    final purgedDocs = <DocsTableData>[];
+
+    await AppData.db.transaction(() async {
+      for (final id in docIds) {
+        final doc = await AppData.db.getDocById(id);
+        if (doc != null && doc.isDeleted) {
+          await _purgeDocRows(doc);
+          purgedDocs.add(doc);
+        }
+        tick();
+      }
+      for (final fId in folderIds) {
+        await _purgeFolderRecursive(fId, purgedDocs, onProgress: tick);
+      }
+    });
+
+    await _deleteDocFiles(purgedDocs);
   }
 
-  static Future<void> _permanentlyDeleteFolderRecursive(String folderId, {required Function() onProgress}) async {
-    // 1. Permanently delete scores and subfolders from DB viewpoint
-    final allDocs = await AppData.db.getAllDocs(); 
-    final docsInFolder = allDocs.where((d) => d.folderId == folderId).toList();
-    for (final d in docsInFolder) {
-      await permanentlyDeleteScore(d.id);
+  static Future<void> _purgeFolderRecursive(
+    String folderId,
+    List<DocsTableData> purgedDocs, {
+    required Function() onProgress,
+  }) async {
+    if (folderId == 'root') return;
+
+    final allDocs = await AppData.db.getAllDocs();
+    for (final d in allDocs.where((d) => d.folderId == folderId)) {
+      if (d.isDeleted) {
+        await _purgeDocRows(d);
+        purgedDocs.add(d);
+      } else {
+        // Documento activo dentro de una carpeta en la papelera: se rescata.
+        await AppData.db.setDocFolder(d.id, 'root');
+      }
       onProgress();
     }
 
     final allFolders = await AppData.db.getAllFolders();
-    final subs = allFolders.where((f) => f.parentId == folderId).toList();
-    for (final s in subs) {
-      await _permanentlyDeleteFolderRecursive(s.id, onProgress: onProgress);
+    for (final s in allFolders.where((f) => f.parentId == folderId)) {
+      if (s.isDeleted) {
+        await _purgeFolderRecursive(s.id, purgedDocs, onProgress: onProgress);
+      } else {
+        await AppData.db.setFolderParent(s.id, null);
+      }
     }
 
-    // 2. Clear Folder itself
     await AppData.db.deleteFolder(folderId);
     onProgress();
   }
 
-  static Future<void> permanentlyDeleteScore(String docId) async {
-    // The previous implementation of deleteScore
-    final dbDocs = await AppData.db.getAllDocs();
-    final dData = dbDocs.where((d) => d.id == docId).firstOrNull;
-    if (dData == null) return;
+  /// Borra de la DB todo lo asociado a un documento (sin tocar archivos).
+  static Future<void> _purgeDocRows(DocsTableData doc) async {
+    await AppData.db.deleteSetlistItemsByDocId(doc.id);
+    await AppData.db.deleteDocStateByDocId(doc.id);
+    await AppData.db.deleteAnnotationsForDoc(doc.id);
+    await AppData.db.deleteDocById(doc.id);
+  }
 
-    // 1. Limpiar referencias en Setlists
-    await AppData.db.deleteSetlistItemsByDocId(docId);
-    // Nota: El setlistId de la memoria puede estar desactualizado si no refrescamos, 
-    // pero hydrateAll() en AppData reconstruye esto.
-
-    // 2. Borrar datos de la partitura
-    await AppData.db.deleteDocStateByDocId(docId);
-    await AppData.db.deleteDocById(docId);
-    await PageEditRepository.discardUndo(docId);
-    
-    // Obtenemos path absoluto para borrar archivo físico
-    final absPath = AppData.storage.absPathFromRelPath(dData.internalRelPath);
-    final file = File(absPath);
-    if (await file.exists()) {
-      await file.delete();
+  /// Borra los PDFs y puntos de restauración de documentos ya purgados.
+  /// Los errores se registran pero no interrumpen (un archivo huérfano es
+  /// preferible a una fila sin archivo).
+  static Future<void> _deleteDocFiles(List<DocsTableData> docs) async {
+    for (final d in docs) {
+      try {
+        final file = File(AppData.storage.absPathFromRelPath(d.internalRelPath));
+        if (await file.exists()) await file.delete();
+      } catch (e) {
+        debugPrint('Warning: no se pudo borrar el archivo de ${d.id}: $e');
+      }
+      await PageEditRepository.discardUndo(d.id);
     }
   }
+
+  /// Purga definitiva de un documento EN LA PAPELERA (no-op si está activo).
+  static Future<void> permanentlyDeleteScore(String docId) =>
+      permanentlyDeleteItems(docIds: [docId], folderIds: const []);
 
   @Deprecated('Use permanentlyDeleteScore instead')
   static Future<void> deleteScore(String docId) async {

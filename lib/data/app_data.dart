@@ -66,7 +66,13 @@ class AppData {
       db = AppDatabase();
       _initFuture = null;
     }
-    return _initFuture ??= _initInternal();
+    final future = _initFuture ??= _initInternal();
+    // Si la inicialización falla, no dejamos el error cacheado para siempre:
+    // el próximo init() lo reintenta.
+    future.catchError((Object _) {
+      if (identical(_initFuture, future)) _initFuture = null;
+    });
+    return future;
   }
 
   static Future<void> closeDbForRestore() async {
@@ -82,6 +88,15 @@ class AppData {
   }
 
   static Future<void> _performAutoCleanup() async {
+    // Una tarea de mantenimiento nunca debe impedir que la app arranque.
+    try {
+      await _performAutoCleanupUnsafe();
+    } catch (e) {
+      debugPrint('Auto-limpieza de papelera falló (se reintentará): $e');
+    }
+  }
+
+  static Future<void> _performAutoCleanupUnsafe() async {
     final now = DateTime.now().millisecondsSinceEpoch;
     final thirtyDaysAgo = now - (30 * 24 * 60 * 60 * 1000);
     

@@ -212,6 +212,20 @@ class AppDatabase extends _$AppDatabase {
      return (select(docsTable)..where((t) => t.isDeleted.equals(true))).get();
   }
 
+  Future<DocsTableData?> getDocById(String docId) {
+    return (select(docsTable)..where((t) => t.id.equals(docId))).getSingleOrNull();
+  }
+
+  /// Cambia solo la carpeta de un doc (sin tocar otras columnas).
+  Future<void> setDocFolder(String docId, String folderId) async {
+    await (update(docsTable)..where((t) => t.id.equals(docId))).write(
+      DocsTableCompanion(
+        folderId: Value(folderId),
+        updatedAt: Value(DateTime.now().millisecondsSinceEpoch),
+      ),
+    );
+  }
+
   Future<void> deleteDocStateByDocId(String docId) async {
     await (delete(docStateTable)..where((t) => t.docId.equals(docId))).go();
   }
@@ -292,6 +306,20 @@ class AppDatabase extends _$AppDatabase {
 
   Future<List<FoldersTableData>> getDeletedFolders() {
     return (select(foldersTable)..where((t) => t.isDeleted.equals(true))).get();
+  }
+
+  Future<FoldersTableData?> getFolderById(String folderId) {
+    return (select(foldersTable)..where((t) => t.id.equals(folderId))).getSingleOrNull();
+  }
+
+  /// Cambia solo el padre de una carpeta (null = raíz).
+  Future<void> setFolderParent(String folderId, String? parentId) async {
+    await (update(foldersTable)..where((t) => t.id.equals(folderId))).write(
+      FoldersTableCompanion(
+        parentId: Value(parentId),
+        updatedAt: Value(DateTime.now().millisecondsSinceEpoch),
+      ),
+    );
   }
 
   // ---------------------------------------------------------------------------
