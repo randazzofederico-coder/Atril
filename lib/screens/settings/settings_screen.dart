@@ -1,6 +1,7 @@
 import 'package:fede_apps_core/fede_apps_core.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../data/backup_manager.dart';
@@ -201,12 +202,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     }
                   },
                 ),
-                const Padding(
-                  padding: EdgeInsets.all(24.0),
+                Padding(
+                  padding: const EdgeInsets.all(24.0),
                   child: Center(
-                    child: Text(
-                      'v1.0.0 - Atril Digital',
-                      style: TextStyle(color: Colors.grey),
+                    // Versión real del build (la de pubspec.yaml)
+                    child: FutureBuilder<PackageInfo>(
+                      future: PackageInfo.fromPlatform(),
+                      builder: (context, snap) {
+                        final info = snap.data;
+                        final version = info == null
+                            ? ''
+                            : 'v${info.version} (${info.buildNumber}) - ';
+                        return Text(
+                          '${version}Atril Digital',
+                          style: const TextStyle(color: Colors.grey),
+                        );
+                      },
                     ),
                   ),
                 ),

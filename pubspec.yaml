@@ -1,7 +1,7 @@
 name: pdf_setlist
 description: "Gestor de partituras PDF."
 publish_to: 'none'
-version: 1.5.0+11
+version: 2.0.0+12
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -43,6 +43,7 @@ dependencies:
   # Firebase (auth/firestore llegan vía fede_apps_core)
   firebase_core: ^3.12.1
   url_launcher: ^6.3.1
+  package_info_plus: ^9.0.0
 
 dev_dependencies:
   flutter_test:
