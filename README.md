@@ -13,7 +13,7 @@
   <img src="https://img.shields.io/badge/Platform-Android%20|%20Windows%20|%20Web-green?logo=android" alt="Platform"/>
   <img src="https://img.shields.io/badge/Cuenta-opcional-FFCA28?logo=firebase" alt="Cuenta opcional"/>
   <img src="https://img.shields.io/badge/License-Private-lightgrey" alt="License"/>
-  <img src="https://img.shields.io/badge/Version-1.19.0-orange" alt="Version"/>
+  <img src="https://img.shields.io/badge/Version-2.0.0-orange" alt="Version"/>
 </p>
 
 ---
@@ -73,12 +73,17 @@
 - **Sellos** rápidos (iconos musicales: coda, segno, etc.).
 - Persistencia por página y por documento (una capa por partitura).
 - **Exportables**: se pueden compartir/exportar "quemadas" sobre el PDF o como datos editables (`.setlist`).
+- **Borrador**: borra lo que toca (trazos, texto, sellos), con tamaño ajustable y zona de acción visible.
+- **Tamaños finos**: selector logarítmico (0.3 a 40) para lapicera, resaltador, tapadera y borrador.
 - **Undo / Redo** por documento (nunca afecta a otro PDF) y "borrar página" que también se puede deshacer.
 - Preferencias de herramientas (último color/grosor usado) guardadas automáticamente.
 
 ### 🎵 Setlists
 - Crea listas de reproducción ordenadas con tus partituras.
-- **Modo Vivo**: navegación fluida entre partituras con un solo tap, ideal para conciertos.
+- **Modo Vivo**: pantalla completa robusta para el escenario, con el mismo motor que el lector (`pdfrx`): anotaciones pegadas a cada página, colores invertidos, pantalla siempre encendida.
+  - **Pedal Bluetooth / teclado**: flechas, PageUp/PageDown y Espacio; al pasar la última página va al tema siguiente.
+  - Botón ▶ en cada tema del setlist para arrancar el Vivo desde ese tema.
+- **Reordenar**: mantener presionado un tema activa la edición y ya lo arrastra.
 - Reordenamiento con drag & drop.
 - **Compartir como ZIP**: archivos ordenados con nombre legible (`01 - Tema.pdf`), con o sin anotaciones aplicadas.
 - **Compartir como `.setlist`**: formato propietario reimportable por otros usuarios de Atril; opcionalmente incluye las anotaciones **editables**.
@@ -191,7 +196,7 @@ lib/
 | **Cuenta (opcional)** | `fede_apps_core` (Firebase Auth con Google, proyecto compartido del ecosistema) |
 | **Cloud** | Solo el perfil de la cuenta opcional (`users/{uid}`); la biblioteca no se sube |
 | **Base de datos local** | Drift (SQLite) con migraciones tipadas |
-| **Visor PDF** | `pdfrx` (renderizado rápido) |
+| **Visor PDF** | `pdfrx` (lector y Modo Vivo; un solo motor) |
 | **PDF Generation** | Syncfusion Flutter PDF |
 | **Procesamiento de imagen** | `image` package + homografía 3×3 custom |
 | **Archivos** | `file_picker`, `path_provider`, `share_plus` |

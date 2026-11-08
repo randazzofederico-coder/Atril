@@ -1,6 +1,6 @@
 # ARCHITECTURE.md — Atril Digital (Flutter)
 
-**Estado del Proyecto:** Consolidación — **v1.19.0 (Cuenta opcional del ecosistema + blindaje de datos)**
+**Estado del Proyecto:** Consolidación — **v2.0.0 (Modo Vivo sobre pdfrx, borrador, cuenta opcional, blindaje de datos)**
 **Fecha de Análisis:** Noviembre 2026
 **Objetivo:** Ninguna operación (papelera, restore, importación, edición de páginas, deshacer) puede perder datos; cada camino crítico tiene tests de punta a punta.
 
@@ -153,6 +153,13 @@ La base de datos (`AppDatabase`) define la estructura core:
 
 ---
 
+### 🎤 v2.0.0
+* **Un solo motor de PDF**: el Modo Vivo (`LiveSetlistScreen`) usa `pdfrx` igual que el lector; se eliminó `syncfusion_flutter_pdfviewer` (`syncfusion_flutter_pdf` se mantiene para generar/editar PDFs). Anotaciones por página vía `pageOverlaysBuilder`, pedal/teclado, inicio desde el tema N.
+* **Borrador** (`AnnotationTool.eraser`): hit-test en unidades de página contra trazos, texto y sellos; borrado optimista y un solo paso de deshacer (`AnnotationLayerController.eraseStrokes`). Círculo de "zona de acción" para goma y tapadera.
+* **Tamaños**: slider logarítmico (`AnnotationStyle.minWidth`..`maxWidth`).
+* **Papelera**: restaurar recrea la ruta de carpetas (solo la ruta) en lugar de mandar a la raíz.
+* **Versión visible**: Ajustes lee la versión real con `package_info_plus`.
+* **Refactor**: `image_edit_screen` y `pdf_page_editor_screen` divididos en archivos `part`; `BackupManager` ya no depende de `BuildContext`.
 ### 👤 Cuenta opcional (v1.19.0)
 * Sin login obligatorio: `main.dart` abre directo `HomeShell`. Se eliminó el login viejo (`auth_gate`, `login_screen`, `onboarding_screen`, cache de permisos/trial).
 * `fede_apps_core` (paquete compartido, `../fede_apps_core`): `FedeAccount` (Google, perfil `users/{uid}`), `AccountSection` y `EcosystemSection` en Ajustes (cuenta solo en Android/iOS/web), `UsageTracker` (métricas locales; actividad = lectura), `EcosystemPrompts.maybeShowAppsPrompt`.
