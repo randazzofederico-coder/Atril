@@ -402,7 +402,14 @@ class ExportManager {
 
       for (int i = 0; i < items.length; i++) {
         final item = items[i];
-        final filename = item['filename'] as String;
+        // `filename` viene de data.json (archivo externo): solo se acepta un
+        // nombre simple .pdf dentro del paquete (sin rutas ni "..").
+        final rawFilename = item['filename'] as String? ?? '';
+        final filename = p.basename(rawFilename);
+        if (filename != rawFilename || !filename.toLowerCase().endsWith('.pdf')) {
+          debugPrint('Warning: nombre de archivo inválido en el paquete: $rawFilename');
+          continue;
+        }
         final title = item['title'] as String? ?? 'Sin título';
         final author = item['author'] as String? ?? '';
 
@@ -660,7 +667,13 @@ Future<void> _unzipSetlistWorker(_UnzipSetlistWorkerArgs args) async {
 
     for (final file in archive) {
       if (file.isFile) {
-        final destPath = p.join(args.destPath, file.name);
+        // Protección zip-slip: ninguna entrada puede escribir fuera del destino.
+        final root = p.normalize(p.absolute(args.destPath));
+        final destPath = p.normalize(p.join(root, file.name));
+        if (!p.isWithin(root, destPath)) {
+          count++;
+          continue;
+        }
         final parentDir = Directory(p.dirname(destPath));
         if (!await parentDir.exists()) {
           await parentDir.create(recursive: true);

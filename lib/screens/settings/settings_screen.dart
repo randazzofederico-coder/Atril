@@ -19,7 +19,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _doBackup() async {
     setState(() => _loading = true);
     try {
-      await BackupManager.instance.createBackup(context);
+      await BackupManager.instance.createBackup();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Backup generado correctamente.')),
@@ -67,7 +67,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     setState(() => _loading = true);
 
     try {
-      await BackupManager.instance.restoreBackup(context, result.files.single.path!);
+      await BackupManager.instance.restoreBackup(result.files.single.path!);
       await AppData.refreshLibrary();
       AppData.triggerNavigationReset();
       
@@ -81,7 +81,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error crítico restaurando: $e\nReinicia la app.'), 
+            content: Text('No se pudo restaurar: $e\nTu biblioteca anterior se mantuvo.'), 
             backgroundColor: Colors.red,
             duration: const Duration(seconds: 5),
           ),

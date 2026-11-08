@@ -12,46 +12,58 @@ import 'package:share_plus/share_plus.dart';
 
 import 'app_data.dart';
 import 'app_database.dart';
+import 'repositories/page_edit_repository.dart';
 
 class BackupManager {
   BackupManager._();
 
   static final BackupManager instance = BackupManager._();
 
-  /// Genera un archivo .atril (ZIP) con la DB y los PDFs y lanza el diálogo de compartir/guardar.
-  Future<void> createBackup(BuildContext context) async {
+  /// Genera un archivo .atril (ZIP) con la DB y los PDFs y lanza el diálogo de
+  /// compartir/guardar. Lanza una excepción si algo falla.
+  ///
+  /// La DB se copia con `VACUUM INTO` (snapshot consistente aunque la app
+  /// esté escribiendo) en lugar de copiar el archivo SQLite "en caliente".
+  Future<void> createBackup() async {
+    File? dbSnapshot;
     try {
       final appDir = await getApplicationDocumentsDirectory();
-      final dbFile = File(p.join(appDir.path, 'atril.sqlite'));
       final docsDir = Directory(p.join(appDir.path, 'atril', 'docs'));
       // 0. Feedback inmediato (con delay para render de UI)
       AppData.backgroundTaskProgress.value = const BackgroundTaskStatus(0.0, 'Escaneando biblioteca...');
       await Future.delayed(const Duration(milliseconds: 50));
 
-      if (!await dbFile.exists()) throw Exception("No se encontró la base de datos.");
+      final tempDir = await getTemporaryDirectory();
 
-      // 1. Preparar lista de archivos
+      // 1. Snapshot consistente de la DB
+      dbSnapshot = File(p.join(tempDir.path, 'atril_backup_${DateTime.now().millisecondsSinceEpoch}.sqlite'));
+      if (await dbSnapshot.exists()) await dbSnapshot.delete();
+      await AppData.db.customStatement('VACUUM INTO ?', [dbSnapshot.path]);
+      if (!await dbSnapshot.exists()) throw Exception("No se pudo copiar la base de datos.");
+
+      // 2. Preparar lista de archivos
       final filesToZip = <_BackupFileEntry>[];
-      filesToZip.add(_BackupFileEntry(dbFile.path, 'atril.sqlite'));
+      filesToZip.add(_BackupFileEntry(dbSnapshot.path, 'atril.sqlite'));
 
       if (await docsDir.exists()) {
         // Async list para no congelar UI
         final files = await docsDir.list(recursive: true).toList();
         for (final file in files) {
           if (file is File) {
-            final filename = p.relative(file.path, from: docsDir.path);
+            // Temporales de escrituras atómicas interrumpidas: no van al backup
+            if (file.path.endsWith('.tmp')) continue;
+            final filename = p.relative(file.path, from: docsDir.path).replaceAll('\\', '/');
             filesToZip.add(_BackupFileEntry(file.path, 'docs/$filename'));
           }
         }
       }
 
-      // 2. Preparar destino
+      // 3. Preparar destino
       final timestamp = DateFormat('yyyyMMdd_HHmm').format(DateTime.now());
       final fileName = 'backup_atril_$timestamp.atril';
-      final tempDir = await getTemporaryDirectory();
       final zipFilePath = p.join(tempDir.path, fileName);
 
-      // 3. Iniciar Worker
+      // 4. Iniciar Worker
       AppData.backgroundTaskProgress.value = const BackgroundTaskStatus(0.0, 'Creando Backup...');
       
       final receivePort = ReceivePort();
@@ -61,135 +73,231 @@ class BackupManager {
           zipPath: zipFilePath, 
           entries: filesToZip, 
           sendPort: receivePort.sendPort
-        )
+        ),
+        onError: receivePort.sendPort,
+        onExit: receivePort.sendPort,
       );
 
-      // 4. Escuchar progreso
-      await for (final message in receivePort) {
-        if (message is double) {
-          AppData.backgroundTaskProgress.value = BackgroundTaskStatus(message, 'Comprimiendo...');
-        } else if (message == 'DONE') {
-           break;
-        } else if (message is String && message.startsWith('ERROR:')) {
-           throw Exception(message);
-        }
-      }
+      // 5. Escuchar progreso
+      await _listenWorker(receivePort, 'Comprimiendo...');
 
       AppData.backgroundTaskProgress.value = null;
 
-      // 5. Exportar
+      // 6. Exportar
       await Share.shareXFiles([XFile(zipFilePath)], text: 'Backup de Atril Digital');
 
     } catch (e) {
-      AppData.backgroundTaskProgress.value = null;
       debugPrint('Error creando backup: $e');
-      if (context.mounted) {
-         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+      rethrow;
+    } finally {
+      AppData.backgroundTaskProgress.value = null;
+      if (dbSnapshot != null) {
+        try { if (await dbSnapshot.exists()) await dbSnapshot.delete(); } catch (_) {}
       }
     }
   }
 
-  /// Restaura un archivo .atril reemplazando la data actual.
-  /// ¡DESTRUCTIVO!
-  Future<void> restoreBackup(BuildContext context, String sourcePath) async {
+  /// Escucha un worker de zip/unzip hasta 'DONE'. Lanza si informa un error
+  /// o si el isolate muere sin avisar (onError/onExit).
+  Future<void> _listenWorker(ReceivePort port, String label) async {
+    try {
+      await for (final message in port) {
+        if (message is double) {
+          AppData.backgroundTaskProgress.value = BackgroundTaskStatus(message, label);
+        } else if (message == 'DONE') {
+          return;
+        } else if (message is String && message.startsWith('ERROR:')) {
+          throw Exception(message);
+        } else if (message == null) {
+          throw Exception('El proceso de compresión terminó inesperadamente.');
+        } else if (message is List) {
+          throw Exception('Error en el proceso de compresión: ${message.first}');
+        }
+      }
+    } finally {
+      port.close();
+    }
+  }
+
+  /// Restaura un archivo .atril reemplazando la biblioteca actual.
+  ///
+  /// Es destructivo por diseño, pero seguro ante fallas:
+  /// 1. Extrae y VALIDA el backup (integridad SQLite + que se pueda leer)
+  ///    antes de tocar nada.
+  /// 2. Mueve la DB y los PDFs actuales a una copia de resguardo (`*.restore_bak`).
+  /// 3. Instala lo nuevo y reabre la DB.
+  /// 4. Si cualquier paso falla, vuelve a poner la biblioteca anterior.
+  /// En todos los casos la DB queda abierta al terminar. Lanza si falla.
+  Future<void> restoreBackup(String sourcePath) async {
     final appDir = await getApplicationDocumentsDirectory();
     final dbFile = File(p.join(appDir.path, 'atril.sqlite'));
     final docsDir = Directory(p.join(appDir.path, 'atril', 'docs'));
-    final shmFile = File(p.join(appDir.path, 'atril.sqlite-shm'));
-    final walFile = File(p.join(appDir.path, 'atril.sqlite-wal'));
+    final sidecars = [
+      File(p.join(appDir.path, 'atril.sqlite-wal')),
+      File(p.join(appDir.path, 'atril.sqlite-shm')),
+    ];
+
+    const bakSuffix = '.restore_bak';
+    final dbBak = File('${dbFile.path}$bakSuffix');
+    final docsBak = Directory('${docsDir.path}$bakSuffix');
 
     // 1. Unzip en Isolate (Evita OOM)
     AppData.backgroundTaskProgress.value = const BackgroundTaskStatus(0.0, 'Verificando y extrayendo backup...');
     
     final tempDir = await getTemporaryDirectory();
-    final extractDirName = 'restore_extraction_${DateTime.now().millisecondsSinceEpoch}';
-    final extractDir = Directory(p.join(tempDir.path, extractDirName));
+    final extractDir = Directory(p.join(tempDir.path, 'restore_extraction_${DateTime.now().millisecondsSinceEpoch}'));
     await extractDir.create(recursive: true);
 
     try {
-        final receivePort = ReceivePort();
-        await Isolate.spawn(
-            _unzipWorker, 
-            _UnzipWorkerArgs(
-            zipPath: sourcePath, 
-            destPath: extractDir.path, 
-            sendPort: receivePort.sendPort
-            )
-        );
+      final receivePort = ReceivePort();
+      await Isolate.spawn(
+        _unzipWorker, 
+        _UnzipWorkerArgs(zipPath: sourcePath, destPath: extractDir.path, sendPort: receivePort.sendPort),
+        onError: receivePort.sendPort,
+        onExit: receivePort.sendPort,
+      );
+      await _listenWorker(receivePort, 'Descomprimiendo para restaurar...');
 
-        await for (final message in receivePort) {
-            if (message is double) {
-                AppData.backgroundTaskProgress.value = BackgroundTaskStatus(message, 'Descomprimiendo para restaurar...');
-            } else if (message == 'DONE') {
-                break;
-            } else if (message is String && message.startsWith('ERROR:')) {
-                throw Exception(message);
-            }
-        }
-        
-        // 2. Validar Contenido Extraído
-        final dbExtractedPath = p.join(extractDir.path, 'atril.sqlite');
-        if (!await File(dbExtractedPath).exists()) throw Exception("El archivo no es un backup válido de Atril (falta DB).");
+      // 2. Validar ANTES de tocar la biblioteca actual
+      final dbExtracted = File(p.join(extractDir.path, 'atril.sqlite'));
+      if (!await dbExtracted.exists()) {
+        throw Exception("El archivo no es un backup válido de Atril (falta la base de datos).");
+      }
+      await _validateBackupDb(dbExtracted);
 
-        // 3. CERRAR DB ACTUAL (Crítico)
-        await AppData.closeDbForRestore();
-        
-        AppData.backgroundTaskProgress.value = const BackgroundTaskStatus(1.0, 'Restaurando archivos...');
+      AppData.backgroundTaskProgress.value = const BackgroundTaskStatus(1.0, 'Restaurando archivos...');
 
-        // 4. Limpiar estado actual (Wipe)
-        if (await dbFile.exists()) await dbFile.delete();
-        if (await shmFile.exists()) await shmFile.delete();
-        if (await walFile.exists()) await walFile.delete();
-        
-        if (await docsDir.exists()) {
-            await docsDir.delete(recursive: true);
-        }
-        await docsDir.create(recursive: true);
+      // 3. Cerrar DB actual y resguardar lo actual
+      await AppData.closeDbForRestore();
 
-        // 5. Mover archivos extraídos a destino final
-        // Mover DB
-        await File(dbExtractedPath).copy(dbFile.path);
-
-        // Mover Docs
-        final docsExtractedDir = Directory(p.join(extractDir.path, 'docs'));
-        if (await docsExtractedDir.exists()) {
-            try {
-               await docsDir.delete();
-               await docsExtractedDir.rename(docsDir.path);
-            } catch (e) {
-               // Fallback copy
-               debugPrint("Rename failed, copying: $e");
-               if (!await docsDir.exists()) await docsDir.create();
-               final files = docsExtractedDir.listSync(recursive: true);
-               for (final entity in files) {
-                   if (entity is File) {
-                       final rel = p.relative(entity.path, from: docsExtractedDir.path);
-                       final dest = File(p.join(docsDir.path, rel));
-                       await dest.create(recursive: true);
-                       await entity.copy(dest.path);
-                   }
-               }
-            }
+      var installed = false;
+      try {
+        // Limpiar resguardos viejos de un intento anterior
+        if (await dbBak.exists()) await dbBak.delete();
+        if (await docsBak.exists()) await docsBak.delete(recursive: true);
+        for (final s in sidecars) {
+          final b = File('${s.path}$bakSuffix');
+          if (await b.exists()) await b.delete();
         }
 
-        // 6. Reinicializar
+        if (await dbFile.exists()) await dbFile.rename(dbBak.path);
+        for (final s in sidecars) {
+          if (await s.exists()) await s.rename('${s.path}$bakSuffix');
+        }
+        if (await docsDir.exists()) await docsDir.rename(docsBak.path);
+
+        // 4. Instalar lo nuevo
+        await dbExtracted.copy(dbFile.path);
+        final docsExtracted = Directory(p.join(extractDir.path, 'docs'));
+        if (await docsExtracted.exists()) {
+          await _moveDir(docsExtracted, docsDir);
+        } else {
+          await docsDir.create(recursive: true);
+        }
+
+        // 5. Reabrir y verificar que carga
         AppData.backgroundTaskProgress.value = const BackgroundTaskStatus(1.0, 'Reiniciando base de datos...');
         await AppData.init(forceReopen: true);
+        installed = true;
+      } catch (e) {
+        debugPrint('Error instalando backup, volviendo a la biblioteca anterior: $e');
+        await _rollbackRestore(dbFile, docsDir, sidecars, dbBak, docsBak, bakSuffix);
+        rethrow;
+      } finally {
+        if (!installed) {
+          // Garantía: la app nunca queda con la DB cerrada
+          try { await AppData.init(forceReopen: true); } catch (e) {
+            debugPrint('Error reabriendo DB tras restore fallido: $e');
+          }
+        }
+      }
 
-    } catch (e) {
-        debugPrint("Error fatal en restore: $e");
-        if (context.mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+      // 6. Éxito: descartar resguardos y puntos de restauración del editor
+      try {
+        if (await dbBak.exists()) await dbBak.delete();
+        if (await docsBak.exists()) await docsBak.delete(recursive: true);
+        for (final s in sidecars) {
+          final b = File('${s.path}$bakSuffix');
+          if (await b.exists()) await b.delete();
         }
+      } catch (e) {
+        debugPrint('Warning: no se pudieron borrar los resguardos del restore: $e');
+      }
+      await PageEditRepository.discardAllUndo();
     } finally {
-        AppData.backgroundTaskProgress.value = null;
-        // Cleanup temp
-        if (await extractDir.exists()) {
-            await extractDir.delete(recursive: true);
-        }
+      AppData.backgroundTaskProgress.value = null;
+      if (await extractDir.exists()) {
+        try { await extractDir.delete(recursive: true); } catch (_) {}
+      }
     }
   }
 
+  /// Abre la DB del backup en modo aislado y verifica que esté sana.
+  Future<void> _validateBackupDb(File dbFile) async {
+    final candidate = AppDatabase(executor: NativeDatabase(dbFile));
+    try {
+      final result = await candidate.customSelect('PRAGMA integrity_check').get();
+      final status = result.isEmpty ? '' : result.first.data.values.first.toString();
+      if (status.toLowerCase() != 'ok') {
+        throw Exception('La base de datos del backup está dañada ($status).');
+      }
+      // Que se pueda leer con el esquema actual (corre migraciones sobre la copia)
+      await candidate.getAllDocs();
+      await candidate.getAllFolders();
+    } catch (e) {
+      throw Exception('El backup no se puede usar: $e');
+    } finally {
+      await candidate.close();
+    }
+  }
+
+  Future<void> _rollbackRestore(
+    File dbFile,
+    Directory docsDir,
+    List<File> sidecars,
+    File dbBak,
+    Directory docsBak,
+    String bakSuffix,
+  ) async {
+    try {
+      if (await dbBak.exists()) {
+        if (await dbFile.exists()) await dbFile.delete();
+        await dbBak.rename(dbFile.path);
+      }
+      for (final s in sidecars) {
+        final b = File('${s.path}$bakSuffix');
+        if (await b.exists()) {
+          if (await s.exists()) await s.delete();
+          await b.rename(s.path);
+        }
+      }
+      if (await docsBak.exists()) {
+        if (await docsDir.exists()) await docsDir.delete(recursive: true);
+        await docsBak.rename(docsDir.path);
+      }
+    } catch (e) {
+      // Si llegamos acá, los resguardos siguen en disco (*.restore_bak).
+      debugPrint('ERROR CRÍTICO en rollback del restore: $e');
+    }
+  }
+
+  /// Mueve un directorio (rename; si falla, copia recursiva).
+  Future<void> _moveDir(Directory from, Directory to) async {
+    try {
+      await from.rename(to.path);
+    } catch (e) {
+      debugPrint("Rename failed, copying: $e");
+      await to.create(recursive: true);
+      await for (final entity in from.list(recursive: true)) {
+        if (entity is File) {
+          final rel = p.relative(entity.path, from: from.path);
+          final dest = File(p.join(to.path, rel));
+          await dest.parent.create(recursive: true);
+          await entity.copy(dest.path);
+        }
+      }
+    }
+  }
 
   Future<void> importBackup(BuildContext context, String sourcePath) async {
     try {
@@ -577,7 +685,13 @@ Future<void> _unzipWorker(_UnzipWorkerArgs args) async {
     
     for (final file in archive) {
       if (file.isFile) {
-         final destPath = p.join(args.destPath, file.name);
+         // Protección zip-slip: ninguna entrada puede escribir fuera del destino.
+         final root = p.normalize(p.absolute(args.destPath));
+         final destPath = p.normalize(p.join(root, file.name));
+         if (!p.isWithin(root, destPath)) {
+           count++;
+           continue;
+         }
          // Asegurar que el directorio padre existe
          final parentDir = Directory(p.dirname(destPath));
          if (!await parentDir.exists()) {

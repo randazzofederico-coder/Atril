@@ -82,9 +82,15 @@ class MainActivity : FlutterActivity() {
         return try {
             val inputStream = contentResolver.openInputStream(uri) ?: return null
 
-            val fileName = getDisplayName(uri)
+            // El nombre lo provee la app que comparte: se sanea para que no
+            // pueda escribir fuera del cache (p. ej. "../shared_prefs/x.xml").
+            val fileName = sanitizeFileName(getDisplayName(uri))
             Log.d(TAG, "Display name: $fileName")
             val tempFile = File(cacheDir, fileName)
+            if (tempFile.canonicalFile.parentFile != cacheDir.canonicalFile) {
+                Log.e(TAG, "Nombre de archivo inválido: $fileName")
+                return null
+            }
 
             tempFile.outputStream().use { output ->
                 inputStream.copyTo(output)
@@ -96,6 +102,18 @@ class MainActivity : FlutterActivity() {
         } catch (e: Exception) {
             Log.e(TAG, "Error copiando archivo", e)
             null
+        }
+    }
+
+    /** Deja solo un nombre de archivo simple (sin separadores ni ".."). */
+    private fun sanitizeFileName(name: String): String {
+        val base = File(name).name
+            .replace(Regex("[\\\\/:*?\"<>|\\u0000-\\u001F]"), "_")
+            .trim()
+        return if (base.isEmpty() || base == "." || base == "..") {
+            "received_${System.currentTimeMillis()}"
+        } else {
+            base
         }
     }
 
