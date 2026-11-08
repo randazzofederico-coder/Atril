@@ -115,6 +115,18 @@ class AnnotationLayerController {
       });
 
   /// Borra todos los trazos de una página. Se puede deshacer.
+  /// Borra trazos puntuales (goma). Se puede deshacer como un solo paso.
+  Future<void> eraseStrokes(String docId, int pageIndex, List<AnnotationStroke> strokes) =>
+      _run(() async {
+        if (strokes.isEmpty) return;
+        for (final s in strokes) {
+          await AppData.deleteAnnotationStroke(s.id);
+        }
+        _history.add(_HistoryEntry.clear(docId, pageIndex, List.of(strokes)));
+        _redoStack.clear();
+        _notify(docId, pageIndex);
+      });
+
   Future<void> clearPage(String docId, int pageIndex) => _run(() async {
         final strokes = await AppData.getAnnotationStrokesForPage(
           docId: docId,
@@ -287,6 +299,119 @@ class _AnnotationLayerState extends State<AnnotationLayer> {
   }
   
   bool get _isTextOrStamp => widget.tool == AnnotationTool.text || widget.tool == AnnotationTool.stamp;
+  bool get _isEraser => widget.tool == AnnotationTool.eraser;
+
+  /// Herramientas que dibujan un trazo (la goma NO dibuja: borra).
+  bool get _isStrokeTool => !_isTextOrStamp && !_isEraser;
+
+  /// Herramientas que muestran la "zona de acción" (círculo) mientras se usan.
+  bool get _showsCursor => _isEraser || widget.tool == AnnotationTool.whiteout;
+
+  // --- Goma -----------------------------------------------------------------
+
+  /// Posición actual (normalizada) del puntero mientras se usa goma/tapadera.
+  Offset? _cursor;
+
+  /// Trazos borrados durante el gesto actual (se confirman al soltar).
+  final List<AnnotationStroke> _erasedPending = [];
+
+  /// Tamaño de referencia en unidades de página (igual que el painter).
+  Size _pageUnits(Size screenSize) {
+    final ref = widget.pageSize;
+    return (ref != null && ref.width > 0 && ref.height > 0) ? ref : screenSize;
+  }
+
+  /// Borra (de forma optimista) los trazos que toca el círculo de la goma.
+  void _eraseAt(Offset norm, Size screenSize) {
+    final units = _pageUnits(screenSize);
+    final p = Offset(norm.dx * units.width, norm.dy * units.height);
+    final radius = widget.width / 2;
+
+    final hit = <AnnotationStroke>[];
+    for (final s in _strokes) {
+      if (_strokeHit(s, p, radius, units)) hit.add(s);
+    }
+    if (hit.isEmpty) return;
+    final hitIds = {for (final s in hit) s.id};
+    _erasedPending.addAll(hit);
+    _strokes = List.unmodifiable(_strokes.where((s) => !hitIds.contains(s.id)));
+  }
+
+  bool _strokeHit(AnnotationStroke s, Offset p, double radius, Size units) {
+    if (s.pointsNorm.isEmpty) return false;
+    Offset toUnits(Offset n) => Offset(n.dx * units.width, n.dy * units.height);
+    final color = s.color ?? AnnotationStyle.defaultColorForTool(s.tool);
+
+    switch (s.tool) {
+      case AnnotationTool.text:
+        final tp = AnnotationStyle.textPainter(s.content ?? '', color, maxWidth: units.width);
+        final o = toUnits(s.pointsNorm.first);
+        return _circleHitsRect(p, radius, Rect.fromLTWH(o.dx, o.dy, tp.width, tp.height));
+      case AnnotationTool.stamp:
+        final tp = AnnotationStyle.stampPainter(s.content ?? '', color);
+        final c = toUnits(s.pointsNorm.first);
+        return _circleHitsRect(
+          p,
+          radius,
+          Rect.fromCenter(center: c, width: tp.width, height: tp.height),
+        );
+      case AnnotationTool.eraser:
+        return false;
+      case AnnotationTool.pen:
+      case AnnotationTool.highlighter:
+      case AnnotationTool.whiteout:
+        final reach = radius + s.width / 2;
+        final pts = s.pointsNorm;
+        if (pts.length == 1) return (toUnits(pts.first) - p).distance <= reach;
+        var a = toUnits(pts.first);
+        for (var i = 1; i < pts.length; i++) {
+          final b = toUnits(pts[i]);
+          if (_distToSegment(p, a, b) <= reach) return true;
+          a = b;
+        }
+        return false;
+    }
+  }
+
+  static bool _circleHitsRect(Offset c, double r, Rect rect) {
+    final nx = c.dx.clamp(rect.left, rect.right);
+    final ny = c.dy.clamp(rect.top, rect.bottom);
+    return (Offset(nx, ny) - c).distance <= r;
+  }
+
+  static double _distToSegment(Offset p, Offset a, Offset b) {
+    final ab = b - a;
+    final len2 = ab.dx * ab.dx + ab.dy * ab.dy;
+    if (len2 == 0) return (p - a).distance;
+    var t = ((p.dx - a.dx) * ab.dx + (p.dy - a.dy) * ab.dy) / len2;
+    t = t.clamp(0.0, 1.0);
+    return (p - (a + ab * t)).distance;
+  }
+
+  /// Confirma lo borrado en el gesto (un solo paso de deshacer).
+  Future<void> _commitErase() async {
+    if (_erasedPending.isEmpty) return;
+    final erased = List<AnnotationStroke>.of(_erasedPending);
+    _erasedPending.clear();
+    try {
+      if (widget.controller != null) {
+        await widget.controller!.eraseStrokes(widget.docId, widget.pageIndex, erased);
+      } else {
+        for (final s in erased) {
+          await AppData.deleteAnnotationStroke(s.id);
+        }
+      }
+    } catch (e) {
+      debugPrint('Error borrando anotaciones: $e');
+      if (mounted) {
+        await _load(); // volver al estado real de la DB
+        if (!mounted) return;
+        ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+          const SnackBar(content: Text('No se pudieron borrar las anotaciones')),
+        );
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -306,6 +431,8 @@ class _AnnotationLayerState extends State<AnnotationLayer> {
               draftWidth: widget.width,
               draftColor: widget.color,
               pageSize: widget.pageSize,
+              cursor: displayOnly ? null : _cursor,
+              cursorRadius: widget.width / 2,
             ),
             size: Size.infinite,
           ),
@@ -325,27 +452,52 @@ class _AnnotationLayerState extends State<AnnotationLayer> {
              if (_activePointers.length > 1) {
                 // Multi-touch: Cancel drawing immediately
                 _allowDrawing = false;
-                setState(() => _draftPoints = null);
-             } else {
-                _allowDrawing = true;
-                if (_isStrokeTool) {
-                   setState(() {
-                     _draftPoints = <Offset>[_normalize(e.localPosition, size)];
-                     _draftRevision++;
-                   });
-                }
+                setState(() {
+                  _draftPoints = null;
+                  _cursor = null;
+                });
+                return;
              }
+             _allowDrawing = true;
+             final pos = _normalize(e.localPosition, size);
+             setState(() {
+               if (_showsCursor) _cursor = pos;
+               if (_isEraser) {
+                 _eraseAt(pos, size);
+               } else if (_isStrokeTool) {
+                 _draftPoints = <Offset>[pos];
+                 _draftRevision++;
+               }
+             });
           },
           onPointerMove: (e) {
-             if (!_allowDrawing || !_isStrokeTool || _draftPoints == null) return;
-             setState(() => _addDraftPoint(_normalize(e.localPosition, size)));
+             if (!_allowDrawing) return;
+             final pos = _normalize(e.localPosition, size);
+             if (_isEraser) {
+               setState(() {
+                 _cursor = pos;
+                 _eraseAt(pos, size);
+               });
+               return;
+             }
+             if (!_isStrokeTool || _draftPoints == null) return;
+             setState(() {
+               if (_showsCursor) _cursor = pos;
+               _addDraftPoint(pos);
+             });
           },
           onPointerUp: (e) {
              _activePointers.remove(e.pointer);
 
-             if (_isStrokeTool && _draftPoints != null) {
+             if (_isEraser) {
+               setState(() => _cursor = null);
+               _commitErase();
+             } else if (_isStrokeTool && _draftPoints != null) {
                  final points = List<Offset>.from(_draftPoints!);
-                 setState(() => _draftPoints = null);
+                 setState(() {
+                   _draftPoints = null;
+                   _cursor = null;
+                 });
                  _commitStroke(points);
              }
              
@@ -355,7 +507,11 @@ class _AnnotationLayerState extends State<AnnotationLayer> {
           },
           onPointerCancel: (e) {
              _activePointers.remove(e.pointer);
-             setState(() => _draftPoints = null);
+             setState(() {
+               _draftPoints = null;
+               _cursor = null;
+             });
+             if (_isEraser) _commitErase();
              if (_activePointers.isEmpty) {
                _allowDrawing = true;
              }
@@ -374,9 +530,6 @@ class _AnnotationLayerState extends State<AnnotationLayer> {
       },
     );
   }
-  
-  bool get _isStrokeTool => 
-      !_isTextOrStamp;
 
   Future<void> _handleTapPlacement(BuildContext context, Offset pos) async {
     if (widget.tool == AnnotationTool.text) {
@@ -470,6 +623,11 @@ class _AnnotationPainter extends CustomPainter {
   final Color? draftColor;
   final Size? pageSize;
 
+  /// "Zona de acción" de la goma/tapadera: centro (normalizado) y radio (en
+  /// unidades de página). null = no se muestra.
+  final Offset? cursor;
+  final double cursorRadius;
+
   _AnnotationPainter({
     required this.strokes,
     required this.draftPoints,
@@ -478,6 +636,8 @@ class _AnnotationPainter extends CustomPainter {
     this.draftWidth,
     this.draftColor,
     this.pageSize,
+    this.cursor,
+    this.cursorRadius = 0,
   });
 
   @override
@@ -506,6 +666,34 @@ class _AnnotationPainter extends CustomPainter {
        _paintStroke(canvas, size, tool, width, dp, color);
     }
 
+    // Zona de acción: círculo del tamaño real que toca la herramienta.
+    final c = cursor;
+    if (c != null && cursorRadius > 0) {
+      final center = Offset(c.dx * size.width, c.dy * size.height);
+      canvas.drawCircle(
+        center,
+        cursorRadius,
+        Paint()..color = Colors.white.withValues(alpha: 0.25),
+      );
+      // Borde de grosor constante en pantalla (1.5 px) con contraste doble
+      canvas.drawCircle(
+        center,
+        cursorRadius,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 3 / scale
+          ..color = Colors.white.withValues(alpha: 0.8),
+      );
+      canvas.drawCircle(
+        center,
+        cursorRadius,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.5 / scale
+          ..color = Colors.black.withValues(alpha: 0.7),
+      );
+    }
+
     canvas.restore();
   }
 
@@ -525,6 +713,8 @@ class _AnnotationPainter extends CustomPainter {
        case AnnotationTool.whiteout:
          _paintStroke(canvas, size, s.tool, s.width, s.pointsNorm, color);
          break;
+       case AnnotationTool.eraser:
+         break; // nunca se guarda como trazo
      }
   }
 
@@ -584,6 +774,8 @@ class _AnnotationPainter extends CustomPainter {
            oldDelegate.pageSize != pageSize ||
            oldDelegate.draftWidth != draftWidth ||
            oldDelegate.draftColor != draftColor ||
-           oldDelegate.draftTool != draftTool;
+           oldDelegate.draftTool != draftTool ||
+           oldDelegate.cursor != cursor ||
+           oldDelegate.cursorRadius != cursorRadius;
   }
 }

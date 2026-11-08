@@ -1,5 +1,8 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import '../../models/annotation_stroke.dart';
+import '../../models/annotation_style.dart';
 
 /// Palette of colors for annotation tools.
 const List<Color> kAnnotationColors = [
@@ -44,10 +47,40 @@ class AnnotationToolbar extends StatefulWidget {
 class _AnnotationToolbarState extends State<AnnotationToolbar> {
   bool _expanded = false;
 
-  bool get _isStrokeTool =>
+  /// Herramientas con tamaño ajustable.
+  bool get _hasSize =>
       widget.selectedTool == AnnotationTool.pen ||
       widget.selectedTool == AnnotationTool.highlighter ||
-      widget.selectedTool == AnnotationTool.whiteout;
+      widget.selectedTool == AnnotationTool.whiteout ||
+      widget.selectedTool == AnnotationTool.eraser;
+
+  /// La goma no tiene color.
+  bool get _hasColor => widget.selectedTool != AnnotationTool.eraser;
+
+  // --- Slider logarítmico de tamaño ------------------------------------------
+  // t ∈ [0..1] → ancho = min · (max/min)^t. Da mucha precisión en tamaños
+  // chicos (0.3, 0.5, 0.8...) sin perder los grandes.
+
+  static double _widthToT(double w) {
+    final clamped = w.clamp(AnnotationStyle.minWidth, AnnotationStyle.maxWidth);
+    return math.log(clamped / AnnotationStyle.minWidth) /
+        math.log(AnnotationStyle.maxWidth / AnnotationStyle.minWidth);
+  }
+
+  static double _tToWidth(double t) {
+    final raw = AnnotationStyle.minWidth *
+        math.pow(AnnotationStyle.maxWidth / AnnotationStyle.minWidth, t);
+    // Redondeo "amable" según la escala
+    if (raw < 1) return (raw * 10).round() / 10;   // 0.3, 0.4, ...
+    if (raw < 5) return (raw * 4).round() / 4;     // 1, 1.25, 1.5, ...
+    if (raw < 10) return (raw * 2).round() / 2;    // 5, 5.5, 6, ...
+    return raw.roundToDouble();                    // 10, 11, 12, ...
+  }
+
+  static String _formatWidth(double w) {
+    if (w == w.roundToDouble()) return w.toStringAsFixed(0);
+    return w < 1 ? w.toStringAsFixed(1) : w.toStringAsFixed(2).replaceFirst(RegExp(r'0$'), '');
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -89,7 +122,16 @@ class _AnnotationToolbarState extends State<AnnotationToolbar> {
                   isSelected: widget.selectedTool == AnnotationTool.whiteout,
                   onTap: () {
                     widget.onTypeChanged(AnnotationTool.whiteout);
-                    setState(() => _expanded = false);
+                    setState(() => _expanded = true); // mostrar tamaño
+                  },
+                ),
+                _ToolButton(
+                  icon: Icons.cleaning_services_outlined,
+                  tooltip: 'Borrador (borra lo que toca)',
+                  isSelected: widget.selectedTool == AnnotationTool.eraser,
+                  onTap: () {
+                    widget.onTypeChanged(AnnotationTool.eraser);
+                    setState(() => _expanded = true); // mostrar tamaño
                   },
                 ),
                 const VerticalDivider(color: Colors.white24, indent: 10, endIndent: 10, width: 20),
@@ -166,7 +208,12 @@ class _AnnotationToolbarState extends State<AnnotationToolbar> {
       ),
       child: Row(
         children: [
-          // Color palette
+          // Color palette (la goma no tiene color)
+          if (!_hasColor)
+            const Expanded(
+              child: Text('Tamaño de la goma', style: TextStyle(color: Colors.white70, fontSize: 13)),
+            )
+          else
           Expanded(
             child: SingleChildScrollView(
               scrollDirection: Axis.horizontal,
@@ -182,8 +229,8 @@ class _AnnotationToolbarState extends State<AnnotationToolbar> {
               ),
             ),
           ),
-          // Width slider (only for stroke tools)
-          if (_isStrokeTool) ...[
+          // Tamaño (lapicera, resaltador, tapadera y goma)
+          if (_hasSize) ...[
             const SizedBox(width: 8),
             // Width preview line
             Container(
@@ -191,11 +238,12 @@ class _AnnotationToolbarState extends State<AnnotationToolbar> {
               height: 24,
               alignment: Alignment.center,
               child: Container(
-                width: widget.selectedWidth.clamp(1.0, 20.0),
-                height: widget.selectedWidth.clamp(1.0, 20.0),
+                width: widget.selectedWidth.clamp(1.0, 22.0),
+                height: widget.selectedWidth.clamp(1.0, 22.0),
                 decoration: BoxDecoration(
-                  color: widget.selectedColor,
+                  color: _hasColor ? widget.selectedColor : Colors.transparent,
                   shape: BoxShape.circle,
+                  border: _hasColor ? null : Border.all(color: Colors.white70, width: 1.5),
                 ),
               ),
             ),
@@ -211,12 +259,12 @@ class _AnnotationToolbarState extends State<AnnotationToolbar> {
                   overlayColor: Colors.cyanAccent.withValues(alpha: 0.2),
                 ),
                 child: Slider(
-                  value: widget.selectedWidth.roundToDouble(),
-                  min: 1.0,
-                  max: 20.0,
-                  divisions: 19,
-                  label: '${widget.selectedWidth.round()}',
-                  onChanged: (v) => widget.onWidthChanged(v.roundToDouble()),
+                  value: _widthToT(widget.selectedWidth),
+                  min: 0.0,
+                  max: 1.0,
+                  label: _formatWidth(widget.selectedWidth),
+                  divisions: 60,
+                  onChanged: (t) => widget.onWidthChanged(_tToWidth(t)),
                 ),
               ),
             ),

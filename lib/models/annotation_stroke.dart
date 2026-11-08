@@ -15,6 +15,9 @@ enum AnnotationTool {
   whiteout,
   text,
   stamp,
+
+  /// Goma: borra las anotaciones que toca. Nunca se guarda como trazo.
+  eraser,
 }
 
 class AnnotationStroke {

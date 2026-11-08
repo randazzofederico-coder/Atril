@@ -31,8 +31,15 @@ class AnnotationStyle {
         return Colors.red;
       case AnnotationTool.text:
         return Colors.black;
+      case AnnotationTool.eraser:
+        return Colors.grey;
     }
   }
+
+  /// Rango del grosor/tamaño (en puntos de página). El selector es
+  /// logarítmico: mucha precisión en tamaños chicos.
+  static const double minWidth = 0.3;
+  static const double maxWidth = 40.0;
 
   static IconData stampIcon(String stampId) {
     switch (stampId) {

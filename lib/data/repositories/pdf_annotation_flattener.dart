@@ -192,6 +192,9 @@ void _drawItem(PdfGraphics g, Size size, AnnotationStroke s, _RasterItem? raster
       );
       break;
 
+    case AnnotationTool.eraser:
+      return; // la goma nunca se guarda como trazo
+
     case AnnotationTool.pen:
     case AnnotationTool.highlighter:
     case AnnotationTool.whiteout:

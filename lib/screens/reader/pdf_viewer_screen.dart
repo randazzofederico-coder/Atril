@@ -211,6 +211,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
       case AnnotationTool.pen: return 3.0;
       case AnnotationTool.highlighter: return 14.0;
       case AnnotationTool.whiteout: return 10.0;
+      case AnnotationTool.eraser: return 12.0;
       default: return 3.0;
     }
   }
