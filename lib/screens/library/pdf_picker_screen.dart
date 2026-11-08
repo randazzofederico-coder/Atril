@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import '../../data/app_data.dart';
-import '../../models/score.dart';
 import '../../widgets/library_browser_selector.dart';
 
 /// Screen for picking a PDF from the library.

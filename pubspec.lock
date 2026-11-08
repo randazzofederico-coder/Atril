@@ -217,14 +217,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "3.0.7"
-  cupertino_icons:
-    dependency: "direct main"
-    description:
-      name: cupertino_icons
-      sha256: ba631d1c7f7bef6b729a622b7b752645a2d076dba9976925b8f25725a30e1ee6
-      url: "https://pub.dev"
-    source: hosted
-    version: "1.0.8"
   dart_pubspec_licenses:
     dependency: transitive
     description:
@@ -281,14 +273,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.30.1"
-  drift_flutter:
-    dependency: "direct main"
-    description:
-      name: drift_flutter
-      sha256: "0bc2f1dde59e59cedde0df67a4ff7bd8f0d42274f18b50bf7e7dae7ca3d77801"
-      url: "https://pub.dev"
-    source: hosted
-    version: "0.1.0"
   fake_async:
     dependency: transitive
     description:
