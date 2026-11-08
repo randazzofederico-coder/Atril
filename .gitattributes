@@ -1,0 +1,22 @@
+# Normalización de finales de línea: el repo guarda LF; cada checkout usa el
+# formato nativo (core.autocrlf / eol del sistema).
+* text=auto
+
+# Scripts de Windows siempre CRLF
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
+*.ps1  text eol=crlf
+*.iss  text eol=crlf
+
+# Binarios
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.webp binary
+*.ico  binary
+*.pdf  binary
+*.jar  binary
+*.jks  binary
+*.keystore binary
+*.atril binary
+*.sqlite binary
