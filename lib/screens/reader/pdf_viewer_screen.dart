@@ -58,6 +58,8 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
     _currentIndex = widget.initialIndex;
     _openScore(_currentIndex);
     PageEditRepository.editRevision.addListener(_onPagesEdited);
+    // Leyendo una partitura la pantalla no se apaga.
+    AppData.settings.acquireScreenOn();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
@@ -67,6 +69,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
   @override
   void dispose() {
     PageEditRepository.editRevision.removeListener(_onPagesEdited);
+    AppData.settings.releaseScreenOn();
     _annotationController.dispose();
     _pageHintTimer?.cancel();
     // _controller?.dispose(); // Not required/available in pdfrx

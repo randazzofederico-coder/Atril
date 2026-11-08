@@ -98,11 +98,25 @@ class SettingsRepository {
   }
 
   void _applyWakelock(bool enable) {
-    if (enable) {
+    if (enable || _screenOnHolds > 0) {
       WakelockPlus.enable();
     } else {
       WakelockPlus.disable();
     }
+  }
+
+  /// Las pantallas de lectura (lector y modo Vivo) fuerzan la pantalla
+  /// encendida mientras están abiertas, sin importar el ajuste global.
+  int _screenOnHolds = 0;
+
+  void acquireScreenOn() {
+    _screenOnHolds++;
+    _applyWakelock(keepScreenOn.value);
+  }
+
+  void releaseScreenOn() {
+    if (_screenOnHolds > 0) _screenOnHolds--;
+    _applyWakelock(keepScreenOn.value);
   }
 
   // --- Invert PDF Colors ---

@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'dart:io';
 import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
 
@@ -38,6 +39,9 @@ class _LiveSetlistScreenState extends State<LiveSetlistScreen> {
   @override
   void initState() {
     super.initState();
+    // En escena: pantalla siempre encendida y modo inmersivo.
+    AppData.settings.acquireScreenOn();
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     _scores = AppData.materializeSetlist(widget.setlist);
     if (_scores.isNotEmpty) {
       _openScoreAt(0);
@@ -46,6 +50,8 @@ class _LiveSetlistScreenState extends State<LiveSetlistScreen> {
 
   @override
   void dispose() {
+    AppData.settings.releaseScreenOn();
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     _hudTimer?.cancel();
     _controller?.dispose();
     super.dispose();
@@ -290,17 +296,29 @@ class _LiveSetlistScreenState extends State<LiveSetlistScreen> {
                       ),
                     ),
                       
-                      // B. Capa de Anotaciones (Solo lectura en vivo)
+                      // B. Capa de Anotaciones (Solo lectura en vivo).
+                      // Lleva el mismo filtro que el PDF: con colores invertidos
+                      // la tinta negra se invierte junto con la partitura.
                       Positioned.fill(
-                        child: AnnotationLayer(
-                          key: ValueKey('${_score?.docId ?? 'no_doc'}_$_currentPage'),
-                          docId: _score?.docId ?? '',
-                          pageIndex: _currentPage,
-                          editable: false,
-                          tool: AnnotationTool.pen,
-                          width: 3.0,
-                          color: Colors.redAccent, // Not used in display-only mode
-                          ignorePointers: true, // Deja pasar los toques
+                        child: ColorFiltered(
+                          colorFilter: AppData.settings.invertPdfColors.value
+                              ? const ColorFilter.matrix([
+                                  -1,  0,  0, 0, 255,
+                                   0, -1,  0, 0, 255,
+                                   0,  0, -1, 0, 255,
+                                   0,  0,  0, 1,   0,
+                                ])
+                              : const ColorFilter.mode(Colors.transparent, BlendMode.dst),
+                          child: AnnotationLayer(
+                            key: ValueKey('${_score?.docId ?? 'no_doc'}_$_currentPage'),
+                            docId: _score?.docId ?? '',
+                            pageIndex: _currentPage,
+                            editable: false,
+                            tool: AnnotationTool.pen,
+                            width: 3.0,
+                            color: Colors.redAccent, // Not used in display-only mode
+                            ignorePointers: true, // Deja pasar los toques
+                          ),
                         ),
                       ),
                     ],
@@ -384,7 +402,7 @@ class _EmptyLiveState extends StatelessWidget {
         child: Text(
           '“$setlistName” no tiene temas para reproducir en vivo.',
           textAlign: TextAlign.center,
-          style: const TextStyle(color: Colors.white70, fontSize: 16),
+          style: const TextStyle(color: Colors.grey, fontSize: 16), // legible en fondo claro u oscuro
         ),
       ),
     );
@@ -406,13 +424,13 @@ class _MissingFileState extends StatelessWidget {
             Text(
               title,
               textAlign: TextAlign.center,
-              style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w600),
+              style: const TextStyle(color: Colors.grey, fontSize: 18, fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 10),
             Text(
               subtitle,
               textAlign: TextAlign.center,
-              style: const TextStyle(color: Colors.white70, fontSize: 14),
+              style: const TextStyle(color: Colors.grey, fontSize: 14),
             ),
           ],
         ),
