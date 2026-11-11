@@ -1,5 +1,5 @@
 Política de Privacidad de Atril
-Última actualización: 15 de abril de 2026
+Última actualización: 11 de noviembre de 2026
 
 Esta Política de Privacidad describe cómo Atril (en adelante, "la Aplicación"), desarrollada por Federico Randazzo (Saroo), recopila, utiliza y protege la información de sus usuarios. Atril está diseñada como una herramienta de fiabilidad para músicos en el escenario, y nuestra política de manejo de datos refleja ese compromiso con la privacidad y el rendimiento local.
 
@@ -20,7 +20,7 @@ Notificaciones de Sistema: Eventos de registro de nuevos usuarios o activaciones
 Uso de esta información: Estos datos se utilizan exclusivamente para autenticar tu ingreso, validar tu suscripción o período de prueba, y garantizar el acceso autorizado a la Aplicación.
 
 B. Datos almacenados localmente (En tu dispositivo)
-Todo tu contenido musical y de trabajo vive de forma exclusiva en tu dispositivo. Atril no sincroniza, sube ni comparte esta información con ningún servidor externo.
+Todo tu contenido musical y de trabajo vive en tu dispositivo (en la versión web/PWA, en el almacenamiento del navegador de ese dispositivo). Atril no sube ni comparte esta información con ningún servidor propio ni de terceros, salvo que actives el backup opcional en tu propio Google Drive (ver punto C).
 
 Biblioteca de Partituras: Todos los archivos PDF importados o escaneados.
 
@@ -30,7 +30,14 @@ Setlists y Estructura: La organización de tus carpetas y listas de reproducció
 
 Configuraciones de la App: Preferencias como el modo oscuro/claro, escala de la interfaz visual, inversión de colores y opciones de wakelock (pantalla siempre encendida).
 
-Archivos de Backup: Los archivos de exportación y copias de seguridad (.atril o .zip) generados por el usuario.
+Archivos de Backup: Los archivos de exportación y copias de seguridad (.atril, .setlist, .atrilfolder o .zip) generados por el usuario.
+
+C. Backup opcional en tu Google Drive
+Si lo activás desde Ajustes, Atril guarda una copia de tu biblioteca (partituras, anotaciones, carpetas, setlists y una base de datos con esa organización) en una carpeta oculta de TU propia cuenta de Google Drive ("appDataFolder"), usando el permiso drive.appdata. Con ese permiso Atril solo puede ver y modificar los archivos que él mismo creó: no accede al resto de tu Drive.
+
+Estos respaldos no pasan por servidores nuestros: van directamente de tu dispositivo a tu Drive y ocupan espacio de tu cuenta. Cada dispositivo guarda su propio respaldo, que podés traer desde otro dispositivo con la misma cuenta. El respaldo es de un solo sentido: lo que pase en Drive nunca modifica ni borra la biblioteca de tu dispositivo.
+
+Podés pausarlo, desactivarlo y borrar todos los respaldos desde la misma pantalla de la app, o revocar el acceso de Atril a tu Drive en cualquier momento desde la configuración de seguridad de tu cuenta de Google.
 
 2. Permisos del Dispositivo
 Para funcionar correctamente, Atril puede solicitar los siguientes permisos en tu dispositivo:
@@ -43,6 +50,8 @@ Almacenamiento / Acceso a Archivos: Necesario para importar partituras en PDF de
 Atril utiliza los siguientes servicios de terceros para su infraestructura base:
 
 Google (Firebase Auth y Cloud Firestore): Para la gestión de usuarios, autenticación y base de datos de permisos. Podés consultar la Política de Privacidad de Google aquí.
+
+Google Drive (solo si activás el backup): Para guardar los respaldos en la carpeta oculta de la app en tu propia cuenta. Se rige por la Política de Privacidad de Google.
 
 Exclusión de Analíticas y Publicidad:
 Atril no integra SDKs de publicidad, no rastrea tu comportamiento dentro de la aplicación mediante servicios de analíticas (como Google Analytics) y no vende ni cede tus datos a terceros bajo ninguna circunstancia.

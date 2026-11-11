@@ -3,30 +3,57 @@ import 'package:image_picker/image_picker.dart' show XFile;
 import 'package:path/path.dart' as p;
 
 import 'fs/atril_fs.dart';
+import 'web_file_picker_stub.dart' if (dart.library.js_interop) 'web_file_picker_web.dart';
 
-/// Hay que pedirle los bytes a file_picker solo en web (en nativo hay ruta).
-bool get pickerNeedsData => !fs.isNative;
+/// Qué se le pide al usuario que elija.
+enum PickKind {
+  /// Partituras PDF (varias).
+  pdfs,
 
-/// Rutas de [AtrilFs] para archivos elegidos con file_picker (llamarlo con
-/// `withData: pickerNeedsData`). En web los bytes se copian a temporales.
-Future<List<String>> fsPathsForPlatformFiles(List<PlatformFile> files) async {
-  final out = <String>[];
-  for (final f in files) {
-    if (fs.isNative) {
-      if (f.path != null) out.add(f.path!);
-      continue;
+  /// Archivos de Atril: .atril, .setlist, .atrilfolder.
+  atrilFile,
+}
+
+/// Abre el selector de archivos y devuelve rutas de [AtrilFs] (lista vacía si
+/// canceló). [onChosen] se llama cuando el usuario ya eligió y empieza la
+/// lectura/descarga (útil para mostrar "Descargando...").
+///
+/// En web usa un selector propio con `accept` explícito: sin él, Android
+/// ofrece solo cámara y fotos.
+Future<List<String>> pickFilesToFs(PickKind kind, {void Function()? onChosen}) async {
+  final multiple = kind == PickKind.pdfs;
+  if (!fs.isNative) {
+    final accept = kind == PickKind.pdfs
+        ? '.pdf,application/pdf'
+        : '.atril,.setlist,.atrilfolder,.zip,application/zip,'
+            'application/x-zip-compressed,application/octet-stream';
+    final picked = await pickFilesWeb(accept: accept, multiple: multiple, onChosen: onChosen);
+    final out = <String>[];
+    for (final (name, bytes) in picked) {
+      out.add(await _writeTemp(name, bytes));
     }
-    final bytes = f.bytes;
-    if (bytes == null) continue;
-    final path = p.join(
-      await fs.tempPath(),
-      'atril_pick_${DateTime.now().microsecondsSinceEpoch}',
-      f.name,
-    );
-    await fs.writeBytes(path, bytes);
-    out.add(path);
+    return out;
   }
-  return out;
+  final result = kind == PickKind.pdfs
+      ? await FilePicker.platform.pickFiles(
+          type: FileType.custom,
+          allowedExtensions: const ['pdf'],
+          allowMultiple: true,
+        )
+      : await FilePicker.platform.pickFiles(type: FileType.any);
+  if (result == null) return const [];
+  onChosen?.call();
+  return [for (final f in result.files) if (f.path != null) f.path!];
+}
+
+Future<String> _writeTemp(String name, List<int> bytes) async {
+  final path = p.join(
+    await fs.tempPath(),
+    'atril_pick_${DateTime.now().microsecondsSinceEpoch}',
+    name.isEmpty ? 'archivo' : name,
+  );
+  await fs.writeBytes(path, bytes);
+  return path;
 }
 
 /// Ruta de [AtrilFs] para un archivo elegido con image_picker/file_picker.

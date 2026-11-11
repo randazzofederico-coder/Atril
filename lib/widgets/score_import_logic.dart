@@ -12,27 +12,14 @@ class ScoreImportLogic {
     if (!kIsWeb) await [Permission.storage].request();
 
     try {
-      // 2. ACTIVAR UI: "Descargando..." (Indeterminado)
-      // Esto se mostrará INMEDIATAMENTE, cubriendo el tiempo que el Picker tarda en descargar.
-      AppData.importState.value = const ImportState(stage: ImportStage.picking);
-
-      // 3. Selección de Archivos
-      // El sistema operativo descargará los archivos antes de devolver el control aquí.
-      final result = await FilePicker.platform.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: ['pdf'],
-        allowMultiple: true,
-        withData: pickerNeedsData,
+      // 2. Selección. "Descargando..." recién cuando el usuario eligió: el
+      //    sistema/navegador puede tardar en bajar archivos de Drive.
+      final validPaths = await pickFilesToFs(
+        PickKind.pdfs,
+        onChosen: () => AppData.importState.value = const ImportState(stage: ImportStage.picking),
       );
 
       // Si el usuario cancela, volvemos a IDLE
-      if (result == null || result.files.isEmpty) {
-        AppData.importState.value = const ImportState(stage: ImportStage.idle);
-        return;
-      }
-
-      final validPaths = await fsPathsForPlatformFiles(result.files);
-
       if (validPaths.isEmpty) {
         AppData.importState.value = const ImportState(stage: ImportStage.idle);
         return;

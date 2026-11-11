@@ -1,5 +1,4 @@
 import 'package:fede_apps_core/fede_apps_core.dart';
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:flutter/material.dart';
@@ -82,9 +81,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     if (confirm != true) return;
 
-    final result = await FilePicker.platform.pickFiles(type: FileType.any, withData: pickerNeedsData);
-    if (result == null || result.files.isEmpty) return;
-    final paths = await fsPathsForPlatformFiles(result.files);
+    final paths = await pickFilesToFs(PickKind.atrilFile);
     if (paths.isEmpty) return;
     
     if (!mounted) return;
@@ -259,9 +256,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _openAtrilFile() async {
     final handler = FileReceiverChannel.onFileReceived;
     if (handler == null) return;
-    final result = await FilePicker.platform.pickFiles(type: FileType.any, withData: pickerNeedsData);
-    if (result == null || result.files.isEmpty) return;
-    final paths = await fsPathsForPlatformFiles(result.files);
+    final paths = await pickFilesToFs(PickKind.atrilFile);
     if (paths.isEmpty || !mounted) return;
     Navigator.pop(context); // volver a la biblioteca: ahí se ve el resultado
     handler(paths.single);
@@ -433,9 +428,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _doImport() async {
-    final result = await FilePicker.platform.pickFiles(type: FileType.any, withData: pickerNeedsData);
-    if (result == null || result.files.isEmpty) return;
-    final paths = await fsPathsForPlatformFiles(result.files);
+    final paths = await pickFilesToFs(PickKind.atrilFile);
     if (paths.isEmpty) return;
     
     if (!mounted) return;
