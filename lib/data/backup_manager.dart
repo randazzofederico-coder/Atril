@@ -94,6 +94,13 @@ class BackupManager {
   /// 4. Si cualquier paso falla, vuelve a poner la biblioteca anterior.
   /// En todos los casos la DB queda abierta al terminar. Lanza si falla.
   Future<void> restoreBackup(String sourcePath) async {
+    if (!fs.isNative) {
+      // En web la base no es un archivo que se pueda mover (ver db_connection_web).
+      throw UnsupportedError(
+        'Restaurar un backup todavía no está disponible en la versión web. '
+        'Usá "Importar backup" para agregarlo a tu biblioteca.',
+      );
+    }
     final dbFile = await mainDatabasePath();
     final docsDir = await AppData.storage.getDocsPath();
     final sidecars = ['$dbFile-wal', '$dbFile-shm'];
