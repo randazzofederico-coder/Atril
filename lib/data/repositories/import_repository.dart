@@ -1,9 +1,9 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import '../../models/score.dart';
+import '../../platform/fs/atril_fs.dart';
 import '../app_data.dart';
 // Eliminado: import 'library_repository.dart'; <- Ya viene incluido dentro de app_data.dart
 
@@ -184,12 +184,11 @@ class ImportRepository {
 
   static Future<int> _countPdfFiles(String path) async {
     int count = 0;
-    final dir = Directory(path);
-    if (!await dir.exists()) return 0;
+    if (!await fs.dirExists(path)) return 0;
     
-    final entities = dir.listSync(recursive: true); // Recursive list is faster for counting
+    final entities = await fs.list(path, recursive: true); // Recursive list is faster for counting
     for (final entity in entities) {
-       if (entity is File && entity.path.toLowerCase().endsWith('.pdf')) {
+       if (entity.isFile && entity.path.toLowerCase().endsWith('.pdf')) {
          count++;
        }
     }
@@ -202,10 +201,9 @@ class ImportRepository {
     int totalFiles,
     _Counter counter
   ) async {
-    final dir = Directory(path);
-    if (!await dir.exists()) return;
+    if (!await fs.dirExists(path)) return;
 
-    final folderName = p.basename(dir.path);
+    final folderName = p.basename(path);
     
     // Crear carpeta (si no es la raíz del import, aunque la UX manda el path seleccionado)
     // En la lógica original, creaba carpeta con el nombre de la carpeta seleccionada.
@@ -216,9 +214,9 @@ class ImportRepository {
     );
 
     try {
-      final entities = dir.listSync(recursive: false);
+      final entities = await fs.list(path);
       for (final entity in entities) {
-        if (entity is File && entity.path.toLowerCase().endsWith('.pdf')) {
+        if (entity.isFile && entity.path.toLowerCase().endsWith('.pdf')) {
            final fileName = p.basename(entity.path).replaceAll('.pdf', '');
            
            counter.val++;
@@ -241,7 +239,7 @@ class ImportRepository {
            // Yield to UI
            await Future.delayed(Duration.zero);
            
-        } else if (entity is Directory) {
+        } else if (entity.isDirectory) {
            final name = p.basename(entity.path);
            if (!name.startsWith('.')) {
              await _importFolderRecursiveBackground(entity.path, newFolderId, totalFiles, counter);

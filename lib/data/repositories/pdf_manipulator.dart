@@ -1,10 +1,12 @@
-import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:image/image.dart' as img;
-import 'package:pdfrx/pdfrx.dart' as pdfrx;
+import 'package:path/path.dart' as p;
 import 'package:syncfusion_flutter_pdf/pdf.dart';
+
+import '../../platform/fs/atril_fs.dart';
+import '../../platform/pdf_open.dart';
 
 /// Describes one page in the final edited PDF.
 class PageEditEntry {
@@ -40,7 +42,7 @@ class PdfManipulator {
   /// Gets the page count for a PDF file.
   static Future<int> getPageCount(String pdfPath) async {
     try {
-      final bytes = await File(pdfPath).readAsBytes();
+      final bytes = await fs.readBytes(pdfPath);
       final doc = PdfDocument(inputBytes: bytes);
       final count = doc.pages.count;
       doc.dispose();
@@ -61,7 +63,7 @@ class PdfManipulator {
     double thumbnailWidth = 300,
   }) async {
     try {
-      final doc = await pdfrx.PdfDocument.openFile(pdfPath);
+      final doc = await openPdfrxDocument(pdfPath);
       if (pageIndex >= doc.pages.length) {
         doc.dispose();
         return null;
@@ -93,10 +95,9 @@ class PdfManipulator {
       rendered.dispose();
       doc.dispose();
 
-      final tempDir = Directory.systemTemp;
-      final thumbPath =
-          '${tempDir.path}/atril_thumb_${DateTime.now().millisecondsSinceEpoch}_$pageIndex.jpg';
-      await File(thumbPath).writeAsBytes(jpegBytes);
+      final thumbPath = p.join(await fs.tempPath(),
+          'atril_thumb_${DateTime.now().millisecondsSinceEpoch}_$pageIndex.jpg');
+      await fs.writeBytes(thumbPath, jpegBytes);
 
       return thumbPath;
     } catch (e) {
@@ -117,7 +118,7 @@ class PdfManipulator {
     required List<PageEditEntry> pageOrder,
     void Function(int current, int total)? onProgress,
   }) async {
-    final sourceBytes = await File(sourcePdfPath).readAsBytes();
+    final sourceBytes = await fs.readBytes(sourcePdfPath);
     final sourceDoc = PdfDocument(inputBytes: sourceBytes);
 
     final resultDoc = PdfDocument();
@@ -149,7 +150,7 @@ class PdfManipulator {
         copyPage(sourceDoc.pages[entry.originalPageIndex!]);
       } else if (entry.externalPath != null) {
         final ext = externalDocs[entry.externalPath!] ??=
-            PdfDocument(inputBytes: await File(entry.externalPath!).readAsBytes());
+            PdfDocument(inputBytes: await fs.readBytes(entry.externalPath!));
         copyPage(ext.pages[entry.externalPageIndex!]);
       } else if (entry.imagePath != null) {
         // Add new image page (same approach as PdfGenerator)
@@ -179,10 +180,9 @@ class PdfManipulator {
   ///
   /// Replicates the logic from PdfGenerator for consistency.
   static Future<void> _addImagePage(PdfDocument doc, String imagePath) async {
-    final file = File(imagePath);
-    if (!await file.exists()) return;
+    if (!await fs.fileExists(imagePath)) return;
 
-    final imageBytes = await file.readAsBytes();
+    final imageBytes = await fs.readBytes(imagePath);
     final PdfBitmap image = PdfBitmap(imageBytes);
 
     const double pageWidth = 595.0; // A4 width in points

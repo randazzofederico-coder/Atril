@@ -1,9 +1,9 @@
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 
+import '../../platform/fs/atril_fs.dart';
 import '../app_data.dart';
 import '../app_database.dart';
 import 'pdf_manipulator.dart';
@@ -103,7 +103,7 @@ class PageEditRepository {
   static Future<bool> hasUndo(String docId) async {
     try {
       final dir = await _undoDir(docId);
-      return await File(p.join(dir.path, _undoPdfName)).exists();
+      return await fs.fileExists(p.join(dir, _undoPdfName));
     } catch (_) {
       return false;
     }
@@ -146,7 +146,7 @@ class PageEditRepository {
   static Future<void> undoLastEdit({required String docId, required String pdfPath}) async {
     final dir = await _undoDir(docId);
     final snapshot = _UndoSnapshot(dir);
-    if (!await File(snapshot.pdfPath).exists()) {
+    if (!await fs.fileExists(snapshot.pdfPath)) {
       throw Exception('No hay una edición para deshacer.');
     }
     await _restoreFromSnapshot(docId, pdfPath, snapshot, keepNewer: true);
@@ -207,8 +207,7 @@ class PageEditRepository {
   /// Elimina el punto de restauración de un documento (si existe).
   static Future<void> discardUndo(String docId) async {
     try {
-      final dir = await _undoDir(docId);
-      if (await dir.exists()) await dir.delete(recursive: true);
+      await fs.deleteDir(await _undoDir(docId));
     } catch (e) {
       debugPrint('Warning: no se pudo borrar undo de $docId: $e');
     }
@@ -218,9 +217,8 @@ class PageEditRepository {
   /// donde dejan de corresponder a los PDFs actuales).
   static Future<void> discardAllUndo() async {
     try {
-      final docsDir = await AppData.storage.getDocsDir();
-      final dir = Directory(p.join(p.dirname(docsDir.path), _undoDirName));
-      if (await dir.exists()) await dir.delete(recursive: true);
+      final docsDir = await AppData.storage.getDocsPath();
+      await fs.deleteDir(p.join(p.dirname(docsDir), _undoDirName));
     } catch (e) {
       debugPrint('Warning: no se pudieron borrar los puntos de restauración: $e');
     }
@@ -230,10 +228,10 @@ class PageEditRepository {
   // INTERNOS
   // ---------------------------------------------------------------------------
 
-  static Future<Directory> _undoDir(String docId) async {
-    final docsDir = await AppData.storage.getDocsDir();
-    final base = p.dirname(docsDir.path); // .../atril
-    return Directory(p.join(base, _undoDirName, docId));
+  static Future<String> _undoDir(String docId) async {
+    final docsDir = await AppData.storage.getDocsPath();
+    final base = p.dirname(docsDir); // .../atril
+    return p.join(base, _undoDirName, docId);
   }
 
   static Future<_UndoSnapshot> _saveUndoSnapshot(
@@ -242,26 +240,26 @@ class PageEditRepository {
     Map<int, int> mapping,
   ) async {
     final dir = await _undoDir(docId);
-    if (await dir.exists()) await dir.delete(recursive: true);
-    await dir.create(recursive: true);
+    await fs.deleteDir(dir);
+    await fs.createDir(dir);
 
     final snapshot = _UndoSnapshot(dir);
-    await File(pdfPath).copy(snapshot.pdfPath);
+    await fs.copy(pdfPath, snapshot.pdfPath);
 
     final rows = await AppData.db.getAllAnnotationStrokesForDocAllLayers(docId);
-    await File(snapshot.metaPath).writeAsString(
+    await fs.writeString(
+      snapshot.metaPath,
       jsonEncode({
         'savedAt': DateTime.now().millisecondsSinceEpoch,
         'strokes': rows.map((r) => r.toJson()).toList(),
         'pageMapping': {for (final e in mapping.entries) '${e.key}': e.value},
       }),
-      flush: true,
     );
     return snapshot;
   }
 
   static Future<Map<String, dynamic>> _readMeta(_UndoSnapshot snapshot) async {
-    return jsonDecode(await File(snapshot.metaPath).readAsString()) as Map<String, dynamic>;
+    return jsonDecode(await fs.readString(snapshot.metaPath)) as Map<String, dynamic>;
   }
 
   static List<AnnotationStrokesTableData> _snapshotRows(Map<String, dynamic> meta) {
@@ -306,22 +304,20 @@ class PageEditRepository {
 
     // PDF: copia + rename (sin cargar todo el archivo en memoria)
     final tempPath = '$pdfPath.tmp';
-    await File(snapshot.pdfPath).copy(tempPath);
-    await File(tempPath).rename(pdfPath);
+    await fs.copy(snapshot.pdfPath, tempPath);
+    await fs.rename(tempPath, pdfPath);
 
     await AppData.db.replaceAnnotationsForDoc(docId, rows);
   }
 
   static Future<void> _atomicWrite(String path, List<int> bytes) async {
-    final tempPath = '$path.tmp';
-    await File(tempPath).writeAsBytes(bytes, flush: true);
-    await File(tempPath).rename(path);
+    await fs.writeBytesAtomic(path, bytes);
   }
 }
 
 class _UndoSnapshot {
-  final Directory dir;
+  final String dir;
   _UndoSnapshot(this.dir);
-  String get pdfPath => p.join(dir.path, PageEditRepository._undoPdfName);
-  String get metaPath => p.join(dir.path, PageEditRepository._undoMetaName);
+  String get pdfPath => p.join(dir, PageEditRepository._undoPdfName);
+  String get metaPath => p.join(dir, PageEditRepository._undoMetaName);
 }

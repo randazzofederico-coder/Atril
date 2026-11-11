@@ -1,11 +1,14 @@
 import 'dart:async';
-import 'dart:io';
-import 'dart:isolate';
 import 'dart:math' as math;
+import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:image/image.dart' as img;
+import 'package:path/path.dart' as p;
+
+import '../../platform/background.dart';
+import '../../platform/fs/atril_fs.dart';
 
 part 'image_edit_processing.dart';
 
@@ -142,7 +145,7 @@ class _ImageEditScreenState extends State<ImageEditScreen> {
   }
 
   Future<void> _loadImage() async {
-    final bytes = await File(widget.imagePath).readAsBytes();
+    final bytes = await fs.readBytes(widget.imagePath);
     final codec = await ui.instantiateImageCodec(bytes);
     final frame = await codec.getNextFrame();
     if (mounted) {
@@ -290,7 +293,7 @@ class _ImageEditScreenState extends State<ImageEditScreen> {
       _cropTL == const Offset(0, 0) && _cropTR == const Offset(1, 0) &&
       _cropBL == const Offset(0, 1) && _cropBR == const Offset(1, 1);
 
-  /// Runs the perspective warp in a background Isolate.
+  /// Runs the perspective warp in the background (Isolate on native).
   /// This is a static-compatible helper so it can be called after the
   /// editor screen has already been popped.
   static Future<String> _runPerspectiveInBackground({
@@ -300,12 +303,13 @@ class _ImageEditScreenState extends State<ImageEditScreen> {
     required ImageEditParams params,
     required void Function(double progress) onProgress,
   }) async {
-    final tempDir = Directory.systemTemp;
-    final tempPath = '${tempDir.path}/atril_edit_${DateTime.now().millisecondsSinceEpoch}.jpg';
+    final tempPath = p.join(
+      await fs.tempPath(),
+      'atril_edit_${DateTime.now().millisecondsSinceEpoch}.jpg',
+    );
 
-    final isolateParams = _PerspectiveProcessParams(
-      sourcePath: sourcePath,
-      tempPath: tempPath,
+    final workerParams = _PerspectiveProcessParams(
+      sourceBytes: await fs.readBytes(sourcePath),
       srcW: srcW,
       srcH: srcH,
       rotation: params.rotation,
@@ -317,43 +321,15 @@ class _ImageEditScreenState extends State<ImageEditScreen> {
       cropBL: params.cropBL, cropBR: params.cropBR,
     );
 
-    // Use Isolate.spawn + ReceivePort so we can get progress updates
-    // from the pixel warp loop in real time.
-    final receivePort = ReceivePort();
-    final completer = Completer<String>();
-
-    // onError/onExit: si el isolate muere (p. ej. sin memoria con fotos muy
-    // grandes) el future termina con error en lugar de quedar colgado.
-    await Isolate.spawn(
-      _processPerspectiveWithProgress,
-      _IsolateMessage(isolateParams, receivePort.sendPort),
-      onError: receivePort.sendPort,
-      onExit: receivePort.sendPort,
+    // Con progreso en tiempo real desde el loop de warp de píxeles. Si el
+    // isolate muere (p. ej. sin memoria con fotos muy grandes) el future
+    // termina con error en lugar de quedar colgado.
+    final jpegBytes = await runHeavyWithProgress(
+      (report) => _runPerspectiveWarp(workerParams, report),
+      onProgress: onProgress,
     );
-
-    receivePort.listen((message) {
-      if (completer.isCompleted) return;
-      if (message is double) {
-        // Progress update (0.0 – 1.0)
-        onProgress(message);
-      } else if (message is String) {
-        // Final result path
-        completer.complete(message);
-        receivePort.close();
-      } else if (message is List) {
-        // ['error', msg] propio, o [error, stack] de onError
-        completer.completeError(Exception(message.length > 1 && message.first == 'error'
-            ? message.last
-            : message.first));
-        receivePort.close();
-      } else if (message == null) {
-        // onExit sin resultado
-        completer.completeError(Exception('El procesamiento de la imagen terminó inesperadamente.'));
-        receivePort.close();
-      }
-    });
-
-    return completer.future;
+    await fs.writeBytes(tempPath, jpegBytes);
+    return tempPath;
   }
 
   /// Fast path for simple rectangular crops using dart:ui (native/GPU).
@@ -421,10 +397,12 @@ class _ImageEditScreenState extends State<ImageEditScreen> {
     );
     final jpegBytes = img.encodeJpg(rawImg, quality: 95);
 
-    final tempDir = Directory.systemTemp;
-    final tempFile = File('${tempDir.path}/atril_edit_${DateTime.now().millisecondsSinceEpoch}.jpg');
-    await tempFile.writeAsBytes(jpegBytes, flush: true);
-    return tempFile.path;
+    final tempPath = p.join(
+      await fs.tempPath(),
+      'atril_edit_${DateTime.now().millisecondsSinceEpoch}.jpg',
+    );
+    await fs.writeBytes(tempPath, jpegBytes);
+    return tempPath;
   }
 
   // --- UI Build ---

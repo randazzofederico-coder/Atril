@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
@@ -7,6 +5,8 @@ import '../../data/app_data.dart';
 import '../../data/repositories/page_edit_repository.dart';
 import '../../data/repositories/pdf_manipulator.dart';
 import '../../models/score.dart';
+import '../../widgets/fs_image.dart';
+import '../../platform/picked_files.dart';
 import 'image_edit_screen.dart';
 import 'pdf_picker_screen.dart';
 
@@ -224,9 +224,11 @@ class _PdfPageEditorScreenState extends State<PdfPageEditorScreen> {
         source: ImageSource.camera,
       );
       if (photo != null && mounted) {
-        final result = await _editImage(photo.path);
+        final photoPath = await fsPathForXFile(photo);
+        if (!mounted) return;
+        final result = await _editImage(photoPath);
         if (result != null && mounted) {
-          _addNewImagePage(photo.path, result);
+          _addNewImagePage(photoPath, result);
         }
       }
     } catch (e) {
@@ -247,9 +249,11 @@ class _PdfPageEditorScreenState extends State<PdfPageEditorScreen> {
       if (images.isNotEmpty && mounted) {
         for (final img in images) {
           if (!mounted) break;
-          final result = await _editImage(img.path);
+          final imgPath = await fsPathForXFile(img);
+          if (!mounted) break;
+          final result = await _editImage(imgPath);
           if (result != null && mounted) {
-            _addNewImagePage(img.path, result);
+            _addNewImagePage(imgPath, result);
           }
         }
       }

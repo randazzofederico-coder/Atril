@@ -1,4 +1,4 @@
-import 'dart:io';
+import '../../platform/fs/atril_fs.dart';
 import 'package:flutter/foundation.dart';
 import 'package:syncfusion_flutter_pdf/pdf.dart';
 import '../../models/score.dart';
@@ -383,8 +383,7 @@ class LibraryRepository {
   static Future<void> _deleteDocFiles(List<DocsTableData> docs) async {
     for (final d in docs) {
       try {
-        final file = File(AppData.storage.absPathFromRelPath(d.internalRelPath));
-        if (await file.exists()) await file.delete();
+        await fs.deleteFile(AppData.storage.absPathFromRelPath(d.internalRelPath));
       } catch (e) {
         debugPrint('Warning: no se pudo borrar el archivo de ${d.id}: $e');
       }
@@ -450,7 +449,7 @@ class LibraryRepository {
   static Future<int> getPagesCountForPath(String path) async {
     if (_pagesCountCache.containsKey(path)) return _pagesCountCache[path]!;
     try {
-      final bytes = await File(path).readAsBytes();
+      final bytes = await fs.readBytes(path);
       final doc = PdfDocument(inputBytes: bytes);
       final c = doc.pages.count;
       doc.dispose(); // Importante cerrar/dispose

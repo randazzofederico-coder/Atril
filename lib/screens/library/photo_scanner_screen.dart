@@ -1,10 +1,11 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../data/app_data.dart';
 import '../../data/repositories/pdf_generator.dart';
+import '../../platform/fs/atril_fs.dart';
+import '../../widgets/fs_image.dart';
+import '../../platform/picked_files.dart';
 import 'image_edit_screen.dart';
 
 /// Screen that allows the user to capture photos and compose them into a PDF.
@@ -58,9 +59,11 @@ class _PhotoScannerScreenState extends State<PhotoScannerScreen> {
         // Modern phones capture 12MP+ which gives us excellent source data.
       );
       if (photo != null && mounted) {
-        final result = await _editImage(photo.path);
+        final photoPath = await fsPathForXFile(photo);
+        if (!mounted) return;
+        final result = await _editImage(photoPath);
         if (result != null && mounted) {
-          _addPage(photo.path, result);
+          _addPage(photoPath, result);
         }
       }
     } catch (e) {
@@ -80,9 +83,11 @@ class _PhotoScannerScreenState extends State<PhotoScannerScreen> {
       if (images.isNotEmpty && mounted) {
         for (final img in images) {
           if (!mounted) break;
-          final result = await _editImage(img.path);
+          final imgPath = await fsPathForXFile(img);
+          if (!mounted) break;
+          final result = await _editImage(imgPath);
           if (result != null && mounted) {
-            _addPage(img.path, result);
+            _addPage(imgPath, result);
           }
         }
       }
@@ -319,7 +324,7 @@ class _PhotoScannerScreenState extends State<PhotoScannerScreen> {
       );
 
       // 4. Cleanup temp file
-      try { await File(tempPath).delete(); } catch (_) {}
+      try { await fs.deleteFile(tempPath); } catch (_) {}
 
       AppData.backgroundTaskProgress.value = BackgroundTaskStatus(
         1.0,
@@ -543,8 +548,7 @@ class _PageTile extends StatelessWidget {
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
-                    Image.file(
-                      File(imagePath),
+                    FsImage(imagePath,
                       fit: BoxFit.cover,
                       cacheWidth: 200,
                       errorBuilder: (_, __, ___) => const Center(

@@ -10,6 +10,7 @@ import '../../models/annotation_stroke.dart';
 import '../../data/app_data.dart';
 import '../../models/score.dart';
 import '../../models/setlist.dart';
+import '../../platform/pdf_open.dart';
 
 /// Modo Vivo: reproducción de un setlist en escena.
 ///
@@ -262,8 +263,8 @@ class _LiveSetlistScreenState extends State<LiveSetlistScreen> {
   }
 
   Widget _buildViewer(Score score, PdfViewerController controller, bool invertPdf, Color bg) {
-    final viewer = PdfViewer.file(
-      score.filePath!,
+    final viewer = PdfViewer(
+      pdfDocumentRefForPath(score.filePath!),
       key: ValueKey('${score.docId}_$_viewerGen'),
       controller: controller,
       params: PdfViewerParams(

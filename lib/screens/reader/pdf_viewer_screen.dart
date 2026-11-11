@@ -15,6 +15,7 @@ import '../../data/app_data.dart';
 import '../library/pdf_page_editor_screen.dart';
 import '../library/export_actions.dart';
 import '../../data/repositories/page_edit_repository.dart';
+import '../../platform/pdf_open.dart';
 
 class PdfViewerScreen extends StatefulWidget {
   final List<Score> sourceScores;
@@ -278,8 +279,8 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
                            0,  0,  0, 1,   0,
                         ])
                       : const ColorFilter.mode(Colors.transparent, BlendMode.dst),
-                child: PdfViewer.file(
-                  score.filePath ?? '',
+                child: PdfViewer(
+                  pdfDocumentRefForPath(score.filePath ?? ''),
                   key: ValueKey('${score.docId}_$_viewerGen'), // visor nuevo en cada apertura
                   controller: _controller,
                   params: PdfViewerParams(

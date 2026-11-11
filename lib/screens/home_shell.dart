@@ -1,6 +1,3 @@
-import 'dart:io';
-
-import 'package:archive/archive_io.dart';
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 
@@ -11,7 +8,9 @@ import 'setlists/setlists_screen.dart';
 import 'settings/settings_screen.dart';
 import '../data/app_data.dart';
 import '../data/backup_manager.dart';
+import '../data/db/db_connection.dart' show kMainDbFileName;
 import '../data/file_receiver_channel.dart';
+import '../platform/zip/zip_tools.dart';
 
 class HomeShell extends StatefulWidget {
   const HomeShell({super.key});
@@ -72,32 +71,14 @@ class _HomeShellState extends State<HomeShell> {
   /// 'atril' si parece un backup, o null si no se reconoce.
   Future<String?> _detectFileType(String path) async {
     try {
-      final file = File(path);
-      if (!await file.exists()) return null;
-
-      // Leer los primeros bytes para verificar si es un ZIP (PK header)
-      final bytes = await file.openRead(0, 4).fold<List<int>>(
-        [],
-        (prev, chunk) => prev..addAll(chunk),
-      );
-      if (bytes.length < 4 || bytes[0] != 0x50 || bytes[1] != 0x4B) {
-        return null; // No es un ZIP
-      }
+      // null = no existe o no es un ZIP
+      final names = await ZipTools.listEntryNames(path);
+      if (names == null) return null;
 
       // Es un ZIP — verificar si contiene data.json (= setlist)
-      final input = InputFileStream(path);
-      try {
-        final archive = ZipDecoder().decodeBuffer(input);
-        var hasDb = false;
-        for (final entry in archive) {
-          if (entry.name == 'data.json') return 'setlist';
-          if (entry.name == 'atril.sqlite') hasDb = true;
-        }
-        // Solo es un backup si trae la base de datos de Atril
-        if (!hasDb) return null;
-      } finally {
-        input.close();
-      }
+      if (names.contains('data.json')) return 'setlist';
+      // Solo es un backup si trae la base de datos de Atril
+      if (!names.contains(kMainDbFileName)) return null;
 
       // Es un ZIP pero sin data.json — podría ser un .atril backup
       return 'atril';

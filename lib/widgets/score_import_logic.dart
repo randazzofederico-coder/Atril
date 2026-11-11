@@ -1,7 +1,7 @@
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'dart:io';
 import '../data/app_data.dart';
 
 class ScoreImportLogic {
@@ -61,7 +61,7 @@ class ScoreImportLogic {
 
   static Future<void> pickAndImportFolder(BuildContext context, String targetFolderId) async {
     // Permiso especial para Android 10+ (Scoped Storage)
-    if (Platform.isAndroid) {
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
       var status = await Permission.manageExternalStorage.status;
       if (!status.isGranted) {
         status = await Permission.manageExternalStorage.request();

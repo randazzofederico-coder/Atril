@@ -31,7 +31,7 @@ void main() {
     );
     SharedPreferences.setMockInitialValues({});
 
-    AppData.storage.initForTesting(Directory('${appDir.path}/atril'));
+    await AppData.storage.initForTesting('${appDir.path}/atril');
     AppData.db = AppDatabase(executor: NativeDatabase(File('${appDir.path}/atril.sqlite')));
 
     // Biblioteca actual: un doc "Actual" con su PDF

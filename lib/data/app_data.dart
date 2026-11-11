@@ -89,7 +89,7 @@ class AppData {
     // Temporales viejos (backups, exportaciones...): en segundo plano.
     unawaited(() async {
       try {
-        await TempCleanup.run(docsDir: await storage.getDocsDir());
+        await TempCleanup.run(docsDir: await storage.getDocsPath());
       } catch (e) {
         debugPrint('TempCleanup falló: $e');
       }

@@ -1,8 +1,6 @@
-import 'dart:io';
 import 'package:drift/drift.dart';
-import 'package:drift/native.dart'; // Importante para NativeDatabase
-import 'package:path_provider/path_provider.dart';
-import 'package:path/path.dart' as p;
+
+import 'db/db_connection.dart';
 
 part 'app_database.g.dart';
 
@@ -89,26 +87,12 @@ class AnnotationStrokesTable extends Table {
 }
 
 
-// --- APERTURA DE CONEXIÓN EXPLÍCITA ---
-LazyDatabase _openConnection([File? customFile]) {
-  return LazyDatabase(() async {
-    if (customFile != null) {
-      return NativeDatabase.createInBackground(customFile);
-    }
-    // Aquí definimos explícitamente que la DB viva en la carpeta de Documentos
-    // para que coincida con donde la busca el BackupManager.
-    final dbFolder = await getApplicationDocumentsDirectory();
-    final file = File(p.join(dbFolder.path, 'atril.sqlite'));
-    return NativeDatabase.createInBackground(file);
-  });
-}
-
 @DriftDatabase(
   tables: [DocsTable, SetlistsTable, SetlistItemsTable, DocStateTable, FoldersTable, AnnotationStrokesTable],
 )
 class AppDatabase extends _$AppDatabase {
   // CAMBIO: Constructor flexible para permitir testing (in-memory) o uso normal (disco)
-  AppDatabase({QueryExecutor? executor, File? customFile}) : super(executor ?? _openConnection(customFile));
+  AppDatabase({QueryExecutor? executor}) : super(executor ?? openMainDatabase());
 
   @override
   int get schemaVersion => 5; 

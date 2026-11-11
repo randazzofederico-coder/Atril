@@ -1,12 +1,11 @@
 part of 'image_edit_screen.dart';
 
-// Procesamiento pesado del editor de imagen (corre en un Isolate):
+// Procesamiento pesado del editor de imagen (corre en segundo plano):
 // recorte con perspectiva (homografía 3x3), rotación, B/N, brillo y contraste.
 
-/// Params passed to the background island for heavy image processing.
+/// Params passed to the background worker for heavy image processing.
 class _PerspectiveProcessParams {
-  final String sourcePath;
-  final String tempPath;
+  final Uint8List sourceBytes;
   final int srcW, srcH;
   final int rotation;
   final bool grayscale;
@@ -16,8 +15,7 @@ class _PerspectiveProcessParams {
   final Offset cropTL, cropTR, cropBL, cropBR;
 
   _PerspectiveProcessParams({
-    required this.sourcePath,
-    required this.tempPath,
+    required this.sourceBytes,
     required this.srcW, required this.srcH,
     required this.rotation,
     required this.grayscale,
@@ -29,29 +27,10 @@ class _PerspectiveProcessParams {
   });
 }
 
-// --- Top-level Isolate Processing ---
-
-/// Message wrapper to pass both params and a SendPort to the isolate.
-class _IsolateMessage {
-  final _PerspectiveProcessParams params;
-  final SendPort sendPort;
-  const _IsolateMessage(this.params, this.sendPort);
-}
-
-/// Isolate entry point that sends progress updates through the SendPort.
-void _processPerspectiveWithProgress(_IsolateMessage msg) {
-  try {
-    final result = _runPerspectiveWarp(msg.params, msg.sendPort);
-    msg.sendPort.send(result); // Send final path as String
-  } catch (e) {
-    msg.sendPort.send(['error', e.toString()]);
-  }
-}
-
-/// Core perspective warp logic. Reports progress through [sendPort] if non-null.
-String _runPerspectiveWarp(_PerspectiveProcessParams p, SendPort? sendPort) {
-  final file = File(p.sourcePath);
-  final bytes = file.readAsBytesSync();
+/// Core perspective warp logic. Reports progress through [report] if non-null.
+/// Returns the processed image as JPEG bytes.
+Uint8List _runPerspectiveWarp(_PerspectiveProcessParams p, void Function(double)? report) {
+  final bytes = p.sourceBytes;
   var source = img.decodeImage(bytes);
   if (source == null) throw Exception('No se pudo decodificar la imagen');
 
@@ -60,7 +39,7 @@ String _runPerspectiveWarp(_PerspectiveProcessParams p, SendPort? sendPort) {
   final int realW = source.width;
   final int realH = source.height;
 
-  sendPort?.send(0.05); // 5% — image decoded
+  report?.call(0.05); // 5% — image decoded
 
   // Warp Quad points back to real pixel coordinates
   final tl = math.Point<double>(p.cropTL.dx * realW, p.cropTL.dy * realH);
@@ -103,11 +82,11 @@ String _runPerspectiveWarp(_PerspectiveProcessParams p, SendPort? sendPort) {
     }
     // Report progress: 5% (decode) + 80% (warp) = 5..85%
     if (v % progressInterval == 0) {
-      sendPort?.send(0.05 + 0.80 * (v / outH));
+      report?.call(0.05 + 0.80 * (v / outH));
     }
   }
 
-  sendPort?.send(0.85); // Warp complete
+  report?.call(0.85); // Warp complete
 
   // 3. Apply Filters
   if (p.brightness != 0 || p.contrast != 0) {
@@ -123,7 +102,7 @@ String _runPerspectiveWarp(_PerspectiveProcessParams p, SendPort? sendPort) {
     img.luminanceThreshold(result, threshold: p.threshold / 255.0);
   }
 
-  sendPort?.send(0.90); // Filters done
+  report?.call(0.90); // Filters done
 
   // Rotation (if needed)
   var finalResult = result;
@@ -133,12 +112,10 @@ String _runPerspectiveWarp(_PerspectiveProcessParams p, SendPort? sendPort) {
 
   // Save as JPEG quality 95
   final outBytes = img.encodeJpg(finalResult, quality: 95);
-  final outFile = File(p.tempPath);
-  outFile.writeAsBytesSync(outBytes);
 
-  sendPort?.send(0.99); // Encoding done
+  report?.call(0.99); // Encoding done
 
-  return p.tempPath;
+  return outBytes;
 }
 
 /// Solves for the 8 coefficients of the 3x3 homography matrix (h22 = 1).

@@ -1,14 +1,18 @@
-import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:image/image.dart' as img;
+import 'package:path/path.dart' as p;
 import 'package:syncfusion_flutter_pdf/pdf.dart';
+
+import '../../platform/fs/atril_fs.dart';
 
 /// Parameters for the background image optimization Isolate.
 class _ImageOptimizeParams {
-  final String sourcePath;
-  final String outputPath;
+  final Uint8List sourceBytes;
+
+  /// Solo para mensajes de error.
+  final String sourceName;
 
   /// Maximum width in pixels (300 DPI A4 = 2480px).
   final int maxWidth;
@@ -17,8 +21,8 @@ class _ImageOptimizeParams {
   final int jpegQuality;
 
   const _ImageOptimizeParams({
-    required this.sourcePath,
-    required this.outputPath,
+    required this.sourceBytes,
+    required this.sourceName,
     this.maxWidth = 2480,
     this.jpegQuality = 92,
   });
@@ -26,15 +30,15 @@ class _ImageOptimizeParams {
 
 /// Result from the optimization Isolate.
 class _ImageOptimizeResult {
-  /// If non-null, use this file (re-encoded). If null, use the original bytes.
-  final String? outputPath;
+  /// If non-null, use these bytes (re-encoded). If null, use the original bytes.
+  final Uint8List? bytes;
   final int width;
   final int height;
   /// True if the original file was already optimal and should be embedded as-is.
   final bool passThrough;
 
   const _ImageOptimizeResult({
-    this.outputPath,
+    this.bytes,
     required this.width,
     required this.height,
     this.passThrough = false,
@@ -69,31 +73,21 @@ class PdfGenerator {
     for (int i = 0; i < total; i++) {
       final path = imagePaths[i];
       try {
-        final file = File(path);
-        if (!await file.exists()) continue;
-        
-        // Check if we can pass through the image directly or need processing
-        final tempDir = Directory.systemTemp;
-        final optimizedPath = '${tempDir.path}/atril_pdf_opt_${DateTime.now().millisecondsSinceEpoch}.jpg';
+        if (!await fs.fileExists(path)) continue;
+        final sourceBytes = await fs.readBytes(path);
 
+        // Check if we can pass through the image directly or need processing
         final optimizeParams = _ImageOptimizeParams(
-          sourcePath: path,
-          outputPath: optimizedPath,
+          sourceBytes: sourceBytes,
+          sourceName: path,
           maxWidth: 2480,   // 300 DPI A4 width
           jpegQuality: 92,
         );
 
         final result = await compute(_optimizeImageIsolate, optimizeParams);
 
-        // Use original bytes if pass-through, otherwise use re-encoded file
-        final Uint8List imageBytes;
-        if (result.passThrough) {
-          imageBytes = await file.readAsBytes();
-        } else {
-          imageBytes = await File(result.outputPath!).readAsBytes();
-          // Cleanup optimized temp file
-          try { await File(result.outputPath!).delete(); } catch (_) {}
-        }
+        // Use original bytes if pass-through, otherwise use re-encoded bytes
+        final Uint8List imageBytes = result.passThrough ? sourceBytes : result.bytes!;
 
         final PdfBitmap image = PdfBitmap(imageBytes);
         
@@ -136,10 +130,12 @@ class PdfGenerator {
 
   /// Saves PDF bytes to a temporary file and returns the path.
   static Future<String> saveTempPdf(Uint8List bytes) async {
-    final tempDir = Directory.systemTemp;
-    final tempFile = File('${tempDir.path}/atril_scan_${DateTime.now().millisecondsSinceEpoch}.pdf');
-    await tempFile.writeAsBytes(bytes, flush: true);
-    return tempFile.path;
+    final tempPath = p.join(
+      await fs.tempPath(),
+      'atril_scan_${DateTime.now().millisecondsSinceEpoch}.pdf',
+    );
+    await fs.writeBytes(tempPath, bytes);
+    return tempPath;
   }
 }
 
@@ -149,13 +145,13 @@ class PdfGenerator {
 /// limits, returns passThrough=true so the caller embeds the original bytes
 /// directly — avoiding quality-degrading double JPEG compression.
 _ImageOptimizeResult _optimizeImageIsolate(_ImageOptimizeParams params) {
-  final bytes = File(params.sourcePath).readAsBytesSync();
+  final bytes = params.sourceBytes;
   
   // Detect format: JPEG starts with 0xFF 0xD8
   final bool isJpeg = bytes.length >= 2 && bytes[0] == 0xFF && bytes[1] == 0xD8;
 
   var image = img.decodeImage(bytes);
-  if (image == null) throw Exception('Failed to decode image: ${params.sourcePath}');
+  if (image == null) throw Exception('Failed to decode image: ${params.sourceName}');
 
   // Bake EXIF orientation so dimensions are correct
   image = img.bakeOrientation(image);
@@ -183,10 +179,9 @@ _ImageOptimizeResult _optimizeImageIsolate(_ImageOptimizeParams params) {
 
   // Re-encode as JPEG with controlled quality
   final jpegBytes = img.encodeJpg(image, quality: params.jpegQuality);
-  File(params.outputPath).writeAsBytesSync(jpegBytes);
 
   return _ImageOptimizeResult(
-    outputPath: params.outputPath,
+    bytes: jpegBytes,
     width: image.width,
     height: image.height,
   );

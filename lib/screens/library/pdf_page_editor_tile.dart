@@ -57,8 +57,7 @@ class _PageTile extends StatelessWidget {
                   fit: StackFit.expand,
                   children: [
                     if (thumbnailPath != null)
-                      Image.file(
-                        File(thumbnailPath!),
+                      FsImage(thumbnailPath!,
                         fit: BoxFit.cover,
                         cacheWidth: 200,
                         errorBuilder: (_, __, ___) => Container(

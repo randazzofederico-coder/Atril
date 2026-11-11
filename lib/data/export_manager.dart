@@ -1,13 +1,11 @@
 import 'dart:convert';
-import 'dart:io';
-import 'dart:isolate';
 
-import 'package:archive/archive_io.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
-import 'package:path_provider/path_provider.dart';
-import 'package:share_plus/share_plus.dart';
 
+import '../platform/fs/atril_fs.dart';
+import '../platform/share_files.dart';
+import '../platform/zip/zip_tools.dart';
 import 'app_data.dart';
 import 'repositories/pdf_annotation_flattener.dart';
 import '../models/annotation_stroke.dart';
@@ -19,7 +17,7 @@ enum SetlistExportFormat { zip, setlist }
 
 /// Gestiona la exportación y compartición de PDFs y Setlists.
 ///
-/// Sigue el patrón de [BackupManager]: singleton, Isolate workers top-level,
+/// Sigue el patrón de [BackupManager]: singleton, compresión vía [ZipTools]
 /// y [BackgroundTaskStatus] para feedback de progreso en la UI.
 class ExportManager {
   ExportManager._();
@@ -54,19 +52,19 @@ class ExportManager {
     if (score.filePath == null) {
       throw Exception('El archivo no tiene una ruta asignada.');
     }
-    final file = File(score.filePath!);
-    if (!await file.exists()) {
+    final sourcePath = score.filePath!;
+    if (!await fs.fileExists(sourcePath)) {
       throw Exception('El archivo PDF no se encontró en el dispositivo.');
     }
 
     // Copiar a temp con el nombre de display para que el destinatario
     // vea "Mi Canción.pdf" en vez de "d_1234567890_1.pdf".
-    final tempDir = await getTemporaryDirectory();
+    final tempDir = await fs.tempPath();
     var displayName = _sanitizeFilename(score.title);
     if (!displayName.toLowerCase().endsWith('.pdf')) {
       displayName += '.pdf';
     }
-    final tempPath = p.join(tempDir.path, displayName);
+    final tempPath = p.join(tempDir, displayName);
 
     if (includeAnnotations) {
       try {
@@ -75,17 +73,17 @@ class ExportManager {
         await Future.delayed(const Duration(milliseconds: 50));
         await PdfAnnotationFlattener.flattenToFile(
           docId: score.docId,
-          sourcePath: file.path,
+          sourcePath: sourcePath,
           outputPath: tempPath,
         );
       } finally {
         AppData.backgroundTaskProgress.value = null;
       }
     } else {
-      await file.copy(tempPath);
+      await fs.copy(sourcePath, tempPath);
     }
 
-    await Share.shareXFiles([XFile(tempPath, mimeType: 'application/pdf')]);
+    await shareFiles([ShareFile(tempPath, mimeType: 'application/pdf')]);
   }
 
   // ---------------------------------------------------------------------------
@@ -120,7 +118,7 @@ class ExportManager {
   /// Empaqueta los PDFs del setlist en un .zip con nombres ordenados
   /// por zero-padding (ej. "01 - Primer Tema.pdf", "02 - Segundo Tema.pdf").
   Future<void> shareSetlistAsZip(Setlist setlist, {bool includeAnnotations = false}) async {
-    Directory? workDir;
+    String? workDir;
     try {
       // 0. Feedback inmediato
       AppData.backgroundTaskProgress.value =
@@ -139,8 +137,7 @@ class ExportManager {
       for (int i = 0; i < scores.length; i++) {
         final score = scores[i];
         if (score.filePath == null) continue;
-        final file = File(score.filePath!);
-        if (!await file.exists()) continue;
+        if (!await fs.fileExists(score.filePath!)) continue;
 
         final prefix = (i + 1).toString().padLeft(padWidth, '0');
         final safeTitle = _sanitizeFilename(score.title);
@@ -160,42 +157,24 @@ class ExportManager {
 
       // 4. Preparar destino temporal
       final safeName = _sanitizeFilename(setlist.name);
-      final tempDir = await getTemporaryDirectory();
-      final zipPath = p.join(tempDir.path, '$safeName.zip');
+      final zipPath = p.join(await fs.tempPath(), '$safeName.zip');
 
-      // 5. Spawn Isolate
+      // 5. Comprimir (en segundo plano) con progreso.
+      //    El ZIP universal no lleva data.json.
       AppData.backgroundTaskProgress.value =
           const BackgroundTaskStatus(0.0, 'Comprimiendo...');
-
-      final receivePort = ReceivePort();
-      await Isolate.spawn(
-        _zipSetlistWorker,
-        _ZipSetlistWorkerArgs(
-          outputPath: zipPath,
-          entries: entries,
-          metadataJson: null, // ZIP universal no lleva data.json
-          sendPort: receivePort.sendPort,
-        ),
+      await ZipTools.zipToFile(
+        zipPath,
+        [for (final e in entries) ZipEntrySpec.file(e.sourcePath, e.zipEntryName)],
+        onProgress: _compressProgress,
       );
-
-      // 6. Escuchar progreso
-      await for (final message in receivePort) {
-        if (message is double) {
-          AppData.backgroundTaskProgress.value =
-              BackgroundTaskStatus(message, 'Comprimiendo...');
-        } else if (message == 'DONE') {
-          break;
-        } else if (message is String && message.startsWith('ERROR:')) {
-          throw Exception(message);
-        }
-      }
 
       AppData.backgroundTaskProgress.value = null;
       await _deleteDirQuietly(workDir);
 
       // 7. Compartir
-      await Share.shareXFiles(
-        [XFile(zipPath, mimeType: 'application/zip')],
+      await shareFiles(
+        [ShareFile(zipPath, mimeType: 'application/zip')],
         subject: setlist.name,
       );
     } catch (e) {
@@ -235,8 +214,7 @@ class ExportManager {
       for (int i = 0; i < scores.length; i++) {
         final score = scores[i];
         if (score.filePath == null) continue;
-        final file = File(score.filePath!);
-        if (!await file.exists()) continue;
+        if (!await fs.fileExists(score.filePath!)) continue;
 
         // Los PDFs se empaquetan con su docId como nombre (el orden lo define data.json)
         final filename = '${score.docId}.pdf';
@@ -279,41 +257,25 @@ class ExportManager {
 
       // 4. Preparar destino temporal
       final safeName = _sanitizeFilename(setlist.name);
-      final tempDir = await getTemporaryDirectory();
-      final setlistPath = p.join(tempDir.path, '$safeName.setlist');
+      final setlistPath = p.join(await fs.tempPath(), '$safeName.setlist');
 
-      // 5. Spawn Isolate
+      // 5. Comprimir (en segundo plano): data.json + PDFs
       AppData.backgroundTaskProgress.value =
           const BackgroundTaskStatus(0.0, 'Comprimiendo...');
-
-      final receivePort = ReceivePort();
-      await Isolate.spawn(
-        _zipSetlistWorker,
-        _ZipSetlistWorkerArgs(
-          outputPath: setlistPath,
-          entries: entries,
-          metadataJson: dataJson,
-          sendPort: receivePort.sendPort,
-        ),
+      await ZipTools.zipToFile(
+        setlistPath,
+        [
+          ZipEntrySpec.bytes(utf8.encode(dataJson), 'data.json'),
+          for (final e in entries) ZipEntrySpec.file(e.sourcePath, e.zipEntryName),
+        ],
+        onProgress: _compressProgress,
       );
-
-      // 6. Escuchar progreso
-      await for (final message in receivePort) {
-        if (message is double) {
-          AppData.backgroundTaskProgress.value =
-              BackgroundTaskStatus(message, 'Comprimiendo...');
-        } else if (message == 'DONE') {
-          break;
-        } else if (message is String && message.startsWith('ERROR:')) {
-          throw Exception(message);
-        }
-      }
 
       AppData.backgroundTaskProgress.value = null;
 
       // 7. Compartir con mensaje promocional
-      await Share.shareXFiles(
-        [XFile(setlistPath, mimeType: 'application/zip')],
+      await shareFiles(
+        [ShareFile(setlistPath, mimeType: 'application/zip')],
         subject: 'Setlist: ${setlist.name}',
         text: 'Acá va el setlist. Abrilo usando Atril. '
             'Si no tenés la app, bajala acá: '
@@ -334,56 +296,34 @@ class ExportManager {
   /// importa los PDFs a la biblioteca y crea el setlist.
   /// Retorna el ID del setlist creado, o null si falló.
   Future<String?> importSetlistFile(String filePath) async {
-    Directory? extractDir;
-    final copiedFiles = <File>[];
+    String? extractDir;
+    final copiedFiles = <String>[];
     try {
       AppData.backgroundTaskProgress.value =
           const BackgroundTaskStatus(0.0, 'Importando setlist...');
       await Future.delayed(const Duration(milliseconds: 50));
 
-      // 1. Descomprimir en Isolate
-      final tempDir = await getTemporaryDirectory();
-      extractDir = Directory(
-        p.join(tempDir.path, 'setlist_import_${DateTime.now().millisecondsSinceEpoch}'),
+      // 1. Descomprimir en segundo plano
+      extractDir = p.join(
+        await fs.tempPath(),
+        'setlist_import_${DateTime.now().millisecondsSinceEpoch}',
       );
-      await extractDir.create(recursive: true);
+      await fs.createDir(extractDir);
 
-      final receivePort = ReceivePort();
-      await Isolate.spawn(
-        _unzipSetlistWorker,
-        _UnzipSetlistWorkerArgs(
-          zipPath: filePath,
-          destPath: extractDir.path,
-          sendPort: receivePort.sendPort,
-        ),
-        onError: receivePort.sendPort,
-        onExit: receivePort.sendPort,
+      await ZipTools.unzipToDir(
+        filePath,
+        extractDir,
+        onProgress: (v) => AppData.backgroundTaskProgress.value =
+            BackgroundTaskStatus(v, 'Descomprimiendo...'),
       );
-
-      try {
-        await for (final message in receivePort) {
-          if (message is double) {
-            AppData.backgroundTaskProgress.value =
-                BackgroundTaskStatus(message, 'Descomprimiendo...');
-          } else if (message == 'DONE') {
-            break;
-          } else if (message is String && message.startsWith('ERROR:')) {
-            throw Exception(message);
-          } else if (message == null || message is List) {
-            throw Exception('La descompresión terminó inesperadamente.');
-          }
-        }
-      } finally {
-        receivePort.close();
-      }
 
       // 2. Leer y parsear data.json
-      final dataJsonFile = File(p.join(extractDir.path, 'data.json'));
-      if (!await dataJsonFile.exists()) {
+      final dataJsonFile = p.join(extractDir, 'data.json');
+      if (!await fs.fileExists(dataJsonFile)) {
         throw Exception('Archivo .setlist inválido: falta data.json');
       }
 
-      final jsonStr = await dataJsonFile.readAsString();
+      final jsonStr = await fs.readString(dataJsonFile);
       final data = jsonDecode(jsonStr) as Map<String, dynamic>;
 
       if (data['format'] != 'atril_setlist_v1') {
@@ -398,7 +338,7 @@ class ExportManager {
       AppData.backgroundTaskProgress.value =
           const BackgroundTaskStatus(0.3, 'Importando partituras...');
 
-      final docsDir = await AppData.storage.getDocsDir();
+      final docsDir = await AppData.storage.getDocsPath();
       final pending = <_PendingSetlistDoc>[];
 
       for (int i = 0; i < items.length; i++) {
@@ -412,16 +352,16 @@ class ExportManager {
           continue;
         }
 
-        final sourceFile = File(p.join(extractDir.path, filename));
-        if (!await sourceFile.exists()) {
+        final sourceFile = p.join(extractDir, filename);
+        if (!await fs.fileExists(sourceFile)) {
           debugPrint('Warning: PDF no encontrado en el paquete: $filename');
           continue;
         }
 
         final newDocId = AppData.newDocId();
         final newFilename = '$newDocId.pdf';
-        final destFile = File(p.join(docsDir.path, newFilename));
-        await sourceFile.copy(destFile.path);
+        final destFile = p.join(docsDir, newFilename);
+        await fs.copy(sourceFile, destFile);
         copiedFiles.add(destFile);
 
         pending.add(_PendingSetlistDoc(
@@ -502,14 +442,14 @@ class ExportManager {
       AppData.backgroundTaskProgress.value = null;
       debugPrint('Error importando setlist: $e');
       for (final f in copiedFiles) {
-        try { if (await f.exists()) await f.delete(); } catch (_) {}
+        try { await fs.deleteFile(f); } catch (_) {}
       }
       rethrow;
     } finally {
       // Cleanup temp
-      if (extractDir != null && await extractDir.exists()) {
+      if (extractDir != null) {
         try {
-          await extractDir.delete(recursive: true);
+          await fs.deleteDir(extractDir);
         } catch (_) {}
       }
     }
@@ -519,25 +459,28 @@ class ExportManager {
   // HELPERS
   // ---------------------------------------------------------------------------
 
+  void _compressProgress(double v) =>
+      AppData.backgroundTaskProgress.value = BackgroundTaskStatus(v, 'Comprimiendo...');
+
   /// Crea un directorio temporal de trabajo para copias aplanadas.
-  Future<Directory> createExportWorkDir() async {
-    final tempDir = await getTemporaryDirectory();
-    final dir = Directory(
-      p.join(tempDir.path, 'export_work_${DateTime.now().millisecondsSinceEpoch}'),
+  Future<String> createExportWorkDir() async {
+    final dir = p.join(
+      await fs.tempPath(),
+      'export_work_${DateTime.now().millisecondsSinceEpoch}',
     );
-    await dir.create(recursive: true);
+    await fs.createDir(dir);
     return dir;
   }
 
-  Future<void> _deleteDirQuietly(Directory? dir) async {
+  Future<void> _deleteDirQuietly(String? dir) async {
     if (dir == null) return;
     try {
-      if (await dir.exists()) await dir.delete(recursive: true);
+      await fs.deleteDir(dir);
     } catch (_) {}
   }
 
   /// Borra un directorio de trabajo ignorando errores.
-  Future<void> deleteDirQuietly(Directory? dir) => _deleteDirQuietly(dir);
+  Future<void> deleteDirQuietly(String? dir) => _deleteDirQuietly(dir);
 
   /// Para cada documento de [sources] (docId → ruta del PDF original) que tenga
   /// anotaciones, genera una copia con las anotaciones aplicadas dentro de
@@ -546,7 +489,7 @@ class ExportManager {
   /// Devuelve docId → ruta del PDF aplanado (solo los que tenían anotaciones).
   Future<Map<String, String>> flattenAnnotatedDocs(
     Map<String, String> sources,
-    Directory workDir,
+    String workDir,
   ) async {
     final annotated = await AnnotationRepository.getAnnotatedDocIds();
     final targets = sources.keys.where(annotated.contains).toList();
@@ -558,7 +501,7 @@ class ExportManager {
         i / targets.length,
         'Aplicando anotaciones (${i + 1}/${targets.length})...',
       );
-      final outPath = p.join(workDir.path, '$docId.pdf');
+      final outPath = p.join(workDir, '$docId.pdf');
       try {
         await PdfAnnotationFlattener.flattenToFile(
           docId: docId,
@@ -577,7 +520,7 @@ class ExportManager {
   /// Reemplaza el origen de cada entrada por su versión aplanada (si aplica).
   Future<void> _applyAnnotationsToEntries(
     List<_ExportFileEntry> entries,
-    Directory workDir,
+    String workDir,
   ) async {
     final sources = <String, String>{
       for (final e in entries)
@@ -597,7 +540,7 @@ class ExportManager {
 }
 
 // =============================================================================
-// ISOLATE WORKER — TOP-LEVEL (requerido por Isolate.spawn)
+// TIPOS INTERNOS
 // =============================================================================
 
 /// Partitura de un .setlist ya copiada, pendiente de registrar en la DB.
@@ -625,114 +568,4 @@ class _ExportFileEntry {
   final String zipEntryName;
   final String? docId;
   _ExportFileEntry(this.sourcePath, this.zipEntryName, {this.docId});
-}
-
-/// Argumentos para el worker de compresión.
-class _ZipSetlistWorkerArgs {
-  final String outputPath;
-  final List<_ExportFileEntry> entries;
-
-  /// Si no es null, se escribe como `data.json` dentro del ZIP (formato .setlist).
-  final String? metadataJson;
-  final SendPort sendPort;
-
-  _ZipSetlistWorkerArgs({
-    required this.outputPath,
-    required this.entries,
-    required this.metadataJson,
-    required this.sendPort,
-  });
-}
-
-/// Worker de compresión ejecutado en un Isolate separado.
-/// Protocolo de mensajes:
-///   - `double` (0.0–1.0): progreso
-///   - `'DONE'`: completado con éxito
-///   - `'ERROR: ...'`: fallo con descripción
-Future<void> _zipSetlistWorker(_ZipSetlistWorkerArgs args) async {
-  try {
-    final encoder = ZipFileEncoder();
-    encoder.create(args.outputPath);
-
-    // 1. Escribir data.json si corresponde (formato .setlist)
-    if (args.metadataJson != null) {
-      final tempDataFile = File('${args.outputPath}_data.json');
-      await tempDataFile.writeAsString(args.metadataJson!, flush: true);
-      await encoder.addFile(tempDataFile, 'data.json');
-      await tempDataFile.delete();
-    }
-
-    // 2. Agregar PDFs con reporte de progreso
-    int count = 0;
-    final total = args.entries.length;
-
-    for (final entry in args.entries) {
-      final file = File(entry.sourcePath);
-      if (await file.exists()) {
-        await encoder.addFile(file, entry.zipEntryName);
-      }
-      count++;
-      args.sendPort.send(count / total);
-    }
-
-    encoder.close();
-    args.sendPort.send('DONE');
-  } catch (e) {
-    args.sendPort.send('ERROR: $e');
-  }
-}
-
-// =============================================================================
-// ISOLATE WORKER — UNZIP (para importación de .setlist)
-// =============================================================================
-
-class _UnzipSetlistWorkerArgs {
-  final String zipPath;
-  final String destPath;
-  final SendPort sendPort;
-  _UnzipSetlistWorkerArgs({
-    required this.zipPath,
-    required this.destPath,
-    required this.sendPort,
-  });
-}
-
-/// Worker de descompresión ejecutado en un Isolate separado.
-/// Mismo protocolo de mensajes que el worker de compresión.
-Future<void> _unzipSetlistWorker(_UnzipSetlistWorkerArgs args) async {
-  try {
-    final inputStream = InputFileStream(args.zipPath);
-    final archive = ZipDecoder().decodeBuffer(inputStream);
-
-    final totalFiles = archive.length;
-    int count = 0;
-
-    for (final file in archive) {
-      if (file.isFile) {
-        // Protección zip-slip: ninguna entrada puede escribir fuera del destino.
-        final root = p.normalize(p.absolute(args.destPath));
-        final destPath = p.normalize(p.join(root, file.name));
-        if (!p.isWithin(root, destPath)) {
-          count++;
-          continue;
-        }
-        final parentDir = Directory(p.dirname(destPath));
-        if (!await parentDir.exists()) {
-          await parentDir.create(recursive: true);
-        }
-        final outputStream = OutputFileStream(destPath);
-        file.writeContent(outputStream);
-        outputStream.close();
-      }
-      count++;
-      if (count % 5 == 0 || count == totalFiles) {
-        args.sendPort.send(count / totalFiles);
-      }
-    }
-
-    inputStream.close();
-    args.sendPort.send('DONE');
-  } catch (e) {
-    args.sendPort.send('ERROR: $e');
-  }
 }

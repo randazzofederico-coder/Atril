@@ -21,7 +21,7 @@ void main() {
       const MethodChannel('plugins.flutter.io/path_provider'),
       (call) async => tempForApp.path,
     );
-    AppData.storage.initForTesting(Directory('${tmp.path}/atril'));
+    await AppData.storage.initForTesting('${tmp.path}/atril');
     AppData.db = AppDatabase(executor: NativeDatabase.memory());
   });
 

@@ -1,8 +1,7 @@
-import 'dart:io';
-
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
-import 'package:path_provider/path_provider.dart';
+
+import '../platform/fs/atril_fs.dart';
 
 /// Limpieza de archivos temporales que genera la app (backups, exportaciones,
 /// extracciones, miniaturas). Corre en segundo plano al iniciar.
@@ -26,46 +25,49 @@ class TempCleanup {
     'atril_edit_',          // imágenes intermedias del editor de imagen
     'atril_pdf_opt_',       // JPEG optimizados del generador de PDF
     'atril_scan_',          // PDF del escáner antes de importarlo
+    'atril_pick_',          // archivos elegidos copiados al almacenamiento (web)
   ];
 
-  static Future<void> run({Directory? docsDir}) async {
-    final dirs = <Directory>{};
+  static Future<void> run({String? docsDir}) async {
+    final dirs = <String>{};
     try {
-      dirs.add(await getTemporaryDirectory());
+      dirs.add(await fs.tempPath());
     } catch (_) {}
-    try {
-      dirs.add(Directory.systemTemp);
-    } catch (_) {}
+    final systemTemp = fs.systemTempPath;
+    if (systemTemp != null) dirs.add(systemTemp);
 
     var deleted = 0;
     final now = DateTime.now();
     for (final dir in dirs) {
-      if (!await dir.exists()) continue;
       try {
-        await for (final entity in dir.list(followLinks: false)) {
-          final name = p.basename(entity.path);
+        for (final entry in await fs.list(dir)) {
+          final name = p.basename(entry.path);
           if (!_prefixes.any(name.startsWith)) continue;
           try {
-            final stat = await entity.stat();
-            if (now.difference(stat.modified) < minAge) continue;
-            await entity.delete(recursive: true);
+            final modified = await fs.modified(entry.path);
+            if (modified == null || now.difference(modified) < minAge) continue;
+            if (entry.isDirectory) {
+              await fs.deleteDir(entry.path);
+            } else {
+              await fs.deleteFile(entry.path);
+            }
             deleted++;
           } catch (_) {}
         }
       } catch (e) {
-        debugPrint('TempCleanup: no se pudo listar ${dir.path}: $e');
+        debugPrint('TempCleanup: no se pudo listar $dir: $e');
       }
     }
 
     // Restos de escrituras atómicas interrumpidas dentro de docs/
-    if (docsDir != null && await docsDir.exists()) {
+    if (docsDir != null) {
       try {
-        await for (final entity in docsDir.list(followLinks: false)) {
-          if (entity is File && entity.path.endsWith('.tmp')) {
+        for (final entry in await fs.list(docsDir)) {
+          if (entry.isFile && entry.path.endsWith('.tmp')) {
             try {
-              final stat = await entity.stat();
-              if (now.difference(stat.modified) < minAge) continue;
-              await entity.delete();
+              final modified = await fs.modified(entry.path);
+              if (modified == null || now.difference(modified) < minAge) continue;
+              await fs.deleteFile(entry.path);
               deleted++;
             } catch (_) {}
           }

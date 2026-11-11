@@ -1,5 +1,3 @@
-import 'dart:io';
-import 'dart:isolate';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
@@ -8,6 +6,8 @@ import 'package:syncfusion_flutter_pdf/pdf.dart';
 
 import '../../models/annotation_stroke.dart';
 import '../../models/annotation_style.dart';
+import '../../platform/background.dart';
+import '../../platform/fs/atril_fs.dart';
 import 'annotation_repository.dart';
 
 /// "Quema" (flatten) las anotaciones no destructivas de un documento sobre una
@@ -42,7 +42,7 @@ class PdfAnnotationFlattener {
   }) async {
     final strokes = await AnnotationRepository.getAnnotationStrokesForDoc(docId);
     if (strokes.isEmpty) {
-      await File(sourcePath).copy(outputPath);
+      await fs.copy(sourcePath, outputPath);
       return false;
     }
 
@@ -65,11 +65,11 @@ class PdfAnnotationFlattener {
     }
 
     // 2. Flatten en Isolate
-    final pdfBytes = await File(sourcePath).readAsBytes();
+    final pdfBytes = await fs.readBytes(sourcePath);
     final args = _FlattenArgs(pdfBytes, strokes, rasters);
-    final result = await Isolate.run(() => _flattenWorker(args));
+    final result = await runHeavy(() => _flattenWorker(args));
 
-    await File(outputPath).writeAsBytes(result, flush: true);
+    await fs.writeBytes(outputPath, result);
     return true;
   }
 

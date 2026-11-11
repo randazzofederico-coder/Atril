@@ -12,7 +12,7 @@ void main() {
 
   setUp(() async {
     tmp = await Directory.systemTemp.createTemp('setlist_test_');
-    AppData.storage.initForTesting(tmp);
+    await AppData.storage.initForTesting(tmp.path);
     AppData.db = AppDatabase(executor: NativeDatabase.memory());
     for (final id in ['a', 'b', 'c']) {
       await AppData.db.upsertDoc(

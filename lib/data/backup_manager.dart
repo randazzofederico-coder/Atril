@@ -1,17 +1,15 @@
-import 'dart:io';
 import 'dart:async';
-import 'dart:isolate'; // Worker
-import 'package:archive/archive_io.dart';
 import 'package:drift/drift.dart' show Value;
-import 'package:drift/native.dart';
 import 'package:flutter/foundation.dart';
 import 'package:intl/intl.dart';
 import 'package:path/path.dart' as p;
-import 'package:path_provider/path_provider.dart';
-import 'package:share_plus/share_plus.dart';
 
+import '../platform/fs/atril_fs.dart';
+import '../platform/share_files.dart';
+import '../platform/zip/zip_tools.dart';
 import 'app_data.dart';
 import 'app_database.dart';
+import 'db/db_connection.dart';
 import 'repositories/page_edit_repository.dart';
 
 class BackupManager {
@@ -25,66 +23,51 @@ class BackupManager {
   /// La DB se copia con `VACUUM INTO` (snapshot consistente aunque la app
   /// esté escribiendo) en lugar de copiar el archivo SQLite "en caliente".
   Future<void> createBackup() async {
-    File? dbSnapshot;
+    String? dbSnapshot;
     try {
-      final appDir = await getApplicationDocumentsDirectory();
-      final docsDir = Directory(p.join(appDir.path, 'atril', 'docs'));
+      final docsDir = await AppData.storage.getDocsPath();
       // 0. Feedback inmediato (con delay para render de UI)
       AppData.backgroundTaskProgress.value = const BackgroundTaskStatus(0.0, 'Escaneando biblioteca...');
       await Future.delayed(const Duration(milliseconds: 50));
 
-      final tempDir = await getTemporaryDirectory();
+      final tempDir = await fs.tempPath();
 
       // 1. Snapshot consistente de la DB
-      dbSnapshot = File(p.join(tempDir.path, 'atril_backup_${DateTime.now().millisecondsSinceEpoch}.sqlite'));
-      if (await dbSnapshot.exists()) await dbSnapshot.delete();
-      await AppData.db.customStatement('VACUUM INTO ?', [dbSnapshot.path]);
-      if (!await dbSnapshot.exists()) throw Exception("No se pudo copiar la base de datos.");
+      dbSnapshot = p.join(tempDir, 'atril_backup_${DateTime.now().millisecondsSinceEpoch}.sqlite');
+      await fs.deleteFile(dbSnapshot);
+      await snapshotDatabaseTo(AppData.db, dbSnapshot);
+      if (!await fs.fileExists(dbSnapshot)) throw Exception("No se pudo copiar la base de datos.");
 
       // 2. Preparar lista de archivos
-      final filesToZip = <_BackupFileEntry>[];
-      filesToZip.add(_BackupFileEntry(dbSnapshot.path, 'atril.sqlite'));
+      final filesToZip = <ZipEntrySpec>[];
+      filesToZip.add(ZipEntrySpec.file(dbSnapshot, kMainDbFileName));
 
-      if (await docsDir.exists()) {
-        // Async list para no congelar UI
-        final files = await docsDir.list(recursive: true).toList();
-        for (final file in files) {
-          if (file is File) {
-            // Temporales de escrituras atómicas interrumpidas: no van al backup
-            if (file.path.endsWith('.tmp')) continue;
-            final filename = p.relative(file.path, from: docsDir.path).replaceAll('\\', '/');
-            filesToZip.add(_BackupFileEntry(file.path, 'docs/$filename'));
-          }
+      for (final file in await fs.list(docsDir, recursive: true)) {
+        if (file.isFile) {
+          // Temporales de escrituras atómicas interrumpidas: no van al backup
+          if (file.path.endsWith('.tmp')) continue;
+          final filename = p.relative(file.path, from: docsDir).replaceAll('\\', '/');
+          filesToZip.add(ZipEntrySpec.file(file.path, 'docs/$filename'));
         }
       }
 
       // 3. Preparar destino
       final timestamp = DateFormat('yyyyMMdd_HHmm').format(DateTime.now());
       final fileName = 'backup_atril_$timestamp.atril';
-      final zipFilePath = p.join(tempDir.path, fileName);
+      final zipFilePath = p.join(tempDir, fileName);
 
-      // 4. Iniciar Worker
+      // 4. Comprimir (en segundo plano) con progreso
       AppData.backgroundTaskProgress.value = const BackgroundTaskStatus(0.0, 'Creando Backup...');
-      
-      final receivePort = ReceivePort();
-      await Isolate.spawn(
-        _zipWorker, 
-        _ZipWorkerArgs(
-          zipPath: zipFilePath, 
-          entries: filesToZip, 
-          sendPort: receivePort.sendPort
-        ),
-        onError: receivePort.sendPort,
-        onExit: receivePort.sendPort,
+      await ZipTools.zipToFile(
+        zipFilePath,
+        filesToZip,
+        onProgress: (v) => AppData.backgroundTaskProgress.value = BackgroundTaskStatus(v, 'Comprimiendo...'),
       );
-
-      // 5. Escuchar progreso
-      await _listenWorker(receivePort, 'Comprimiendo...');
 
       AppData.backgroundTaskProgress.value = null;
 
       // 6. Exportar
-      await Share.shareXFiles([XFile(zipFilePath)], text: 'Backup de Atril Digital');
+      await shareFiles([ShareFile(zipFilePath)], text: 'Backup de Atril Digital');
 
     } catch (e) {
       debugPrint('Error creando backup: $e');
@@ -92,32 +75,14 @@ class BackupManager {
     } finally {
       AppData.backgroundTaskProgress.value = null;
       if (dbSnapshot != null) {
-        try { if (await dbSnapshot.exists()) await dbSnapshot.delete(); } catch (_) {}
+        try { await fs.deleteFile(dbSnapshot); } catch (_) {}
       }
     }
   }
 
-  /// Escucha un worker de zip/unzip hasta 'DONE'. Lanza si informa un error
-  /// o si el isolate muere sin avisar (onError/onExit).
-  Future<void> _listenWorker(ReceivePort port, String label) async {
-    try {
-      await for (final message in port) {
-        if (message is double) {
-          AppData.backgroundTaskProgress.value = BackgroundTaskStatus(message, label);
-        } else if (message == 'DONE') {
-          return;
-        } else if (message is String && message.startsWith('ERROR:')) {
-          throw Exception(message);
-        } else if (message == null) {
-          throw Exception('El proceso de compresión terminó inesperadamente.');
-        } else if (message is List) {
-          throw Exception('Error en el proceso de compresión: ${message.first}');
-        }
-      }
-    } finally {
-      port.close();
-    }
-  }
+  /// Actualiza la barra de progreso global con [label].
+  void Function(double) _progress(String label) =>
+      (v) => AppData.backgroundTaskProgress.value = BackgroundTaskStatus(v, label);
 
   /// Restaura un archivo .atril reemplazando la biblioteca actual.
   ///
@@ -129,38 +94,26 @@ class BackupManager {
   /// 4. Si cualquier paso falla, vuelve a poner la biblioteca anterior.
   /// En todos los casos la DB queda abierta al terminar. Lanza si falla.
   Future<void> restoreBackup(String sourcePath) async {
-    final appDir = await getApplicationDocumentsDirectory();
-    final dbFile = File(p.join(appDir.path, 'atril.sqlite'));
-    final docsDir = Directory(p.join(appDir.path, 'atril', 'docs'));
-    final sidecars = [
-      File(p.join(appDir.path, 'atril.sqlite-wal')),
-      File(p.join(appDir.path, 'atril.sqlite-shm')),
-    ];
+    final dbFile = await mainDatabasePath();
+    final docsDir = await AppData.storage.getDocsPath();
+    final sidecars = ['$dbFile-wal', '$dbFile-shm'];
 
     const bakSuffix = '.restore_bak';
-    final dbBak = File('${dbFile.path}$bakSuffix');
-    final docsBak = Directory('${docsDir.path}$bakSuffix');
+    final dbBak = '$dbFile$bakSuffix';
+    final docsBak = '$docsDir$bakSuffix';
 
-    // 1. Unzip en Isolate (Evita OOM)
+    // 1. Unzip en segundo plano (Evita OOM)
     AppData.backgroundTaskProgress.value = const BackgroundTaskStatus(0.0, 'Verificando y extrayendo backup...');
     
-    final tempDir = await getTemporaryDirectory();
-    final extractDir = Directory(p.join(tempDir.path, 'restore_extraction_${DateTime.now().millisecondsSinceEpoch}'));
-    await extractDir.create(recursive: true);
+    final extractDir = p.join(await fs.tempPath(), 'restore_extraction_${DateTime.now().millisecondsSinceEpoch}');
+    await fs.createDir(extractDir);
 
     try {
-      final receivePort = ReceivePort();
-      await Isolate.spawn(
-        _unzipWorker, 
-        _UnzipWorkerArgs(zipPath: sourcePath, destPath: extractDir.path, sendPort: receivePort.sendPort),
-        onError: receivePort.sendPort,
-        onExit: receivePort.sendPort,
-      );
-      await _listenWorker(receivePort, 'Descomprimiendo para restaurar...');
+      await ZipTools.unzipToDir(sourcePath, extractDir, onProgress: _progress('Descomprimiendo para restaurar...'));
 
       // 2. Validar ANTES de tocar la biblioteca actual
-      final dbExtracted = File(p.join(extractDir.path, 'atril.sqlite'));
-      if (!await dbExtracted.exists()) {
+      final dbExtracted = p.join(extractDir, kMainDbFileName);
+      if (!await fs.fileExists(dbExtracted)) {
         throw Exception("El archivo no es un backup válido de Atril (falta la base de datos).");
       }
       await _validateBackupDb(dbExtracted);
@@ -173,26 +126,25 @@ class BackupManager {
       var installed = false;
       try {
         // Limpiar resguardos viejos de un intento anterior
-        if (await dbBak.exists()) await dbBak.delete();
-        if (await docsBak.exists()) await docsBak.delete(recursive: true);
+        await fs.deleteFile(dbBak);
+        await fs.deleteDir(docsBak);
         for (final s in sidecars) {
-          final b = File('${s.path}$bakSuffix');
-          if (await b.exists()) await b.delete();
+          await fs.deleteFile('$s$bakSuffix');
         }
 
-        if (await dbFile.exists()) await dbFile.rename(dbBak.path);
+        if (await fs.fileExists(dbFile)) await fs.rename(dbFile, dbBak);
         for (final s in sidecars) {
-          if (await s.exists()) await s.rename('${s.path}$bakSuffix');
+          if (await fs.fileExists(s)) await fs.rename(s, '$s$bakSuffix');
         }
-        if (await docsDir.exists()) await docsDir.rename(docsBak.path);
+        if (await fs.dirExists(docsDir)) await fs.rename(docsDir, docsBak);
 
         // 4. Instalar lo nuevo
-        await dbExtracted.copy(dbFile.path);
-        final docsExtracted = Directory(p.join(extractDir.path, 'docs'));
-        if (await docsExtracted.exists()) {
+        await fs.copy(dbExtracted, dbFile);
+        final docsExtracted = p.join(extractDir, 'docs');
+        if (await fs.dirExists(docsExtracted)) {
           await _moveDir(docsExtracted, docsDir);
         } else {
-          await docsDir.create(recursive: true);
+          await fs.createDir(docsDir);
         }
 
         // 5. Reabrir y verificar que carga
@@ -214,11 +166,10 @@ class BackupManager {
 
       // 6. Éxito: descartar resguardos y puntos de restauración del editor
       try {
-        if (await dbBak.exists()) await dbBak.delete();
-        if (await docsBak.exists()) await docsBak.delete(recursive: true);
+        await fs.deleteFile(dbBak);
+        await fs.deleteDir(docsBak);
         for (final s in sidecars) {
-          final b = File('${s.path}$bakSuffix');
-          if (await b.exists()) await b.delete();
+          await fs.deleteFile('$s$bakSuffix');
         }
       } catch (e) {
         debugPrint('Warning: no se pudieron borrar los resguardos del restore: $e');
@@ -226,15 +177,13 @@ class BackupManager {
       await PageEditRepository.discardAllUndo();
     } finally {
       AppData.backgroundTaskProgress.value = null;
-      if (await extractDir.exists()) {
-        try { await extractDir.delete(recursive: true); } catch (_) {}
-      }
+      try { await fs.deleteDir(extractDir); } catch (_) {}
     }
   }
 
   /// Abre la DB del backup en modo aislado y verifica que esté sana.
-  Future<void> _validateBackupDb(File dbFile) async {
-    final candidate = AppDatabase(executor: NativeDatabase(dbFile));
+  Future<void> _validateBackupDb(String dbFile) async {
+    final candidate = AppDatabase(executor: openDatabaseAtPath(dbFile));
     try {
       final result = await candidate.customSelect('PRAGMA integrity_check').get();
       final status = result.isEmpty ? '' : result.first.data.values.first.toString();
@@ -252,28 +201,28 @@ class BackupManager {
   }
 
   Future<void> _rollbackRestore(
-    File dbFile,
-    Directory docsDir,
-    List<File> sidecars,
-    File dbBak,
-    Directory docsBak,
+    String dbFile,
+    String docsDir,
+    List<String> sidecars,
+    String dbBak,
+    String docsBak,
     String bakSuffix,
   ) async {
     try {
-      if (await dbBak.exists()) {
-        if (await dbFile.exists()) await dbFile.delete();
-        await dbBak.rename(dbFile.path);
+      if (await fs.fileExists(dbBak)) {
+        await fs.deleteFile(dbFile);
+        await fs.rename(dbBak, dbFile);
       }
       for (final s in sidecars) {
-        final b = File('${s.path}$bakSuffix');
-        if (await b.exists()) {
-          if (await s.exists()) await s.delete();
-          await b.rename(s.path);
+        final b = '$s$bakSuffix';
+        if (await fs.fileExists(b)) {
+          await fs.deleteFile(s);
+          await fs.rename(b, s);
         }
       }
-      if (await docsBak.exists()) {
-        if (await docsDir.exists()) await docsDir.delete(recursive: true);
-        await docsBak.rename(docsDir.path);
+      if (await fs.dirExists(docsBak)) {
+        await fs.deleteDir(docsDir);
+        await fs.rename(docsBak, docsDir);
       }
     } catch (e) {
       // Si llegamos acá, los resguardos siguen en disco (*.restore_bak).
@@ -282,18 +231,16 @@ class BackupManager {
   }
 
   /// Mueve un directorio (rename; si falla, copia recursiva).
-  Future<void> _moveDir(Directory from, Directory to) async {
+  Future<void> _moveDir(String from, String to) async {
     try {
-      await from.rename(to.path);
+      await fs.rename(from, to);
     } catch (e) {
       debugPrint("Rename failed, copying: $e");
-      await to.create(recursive: true);
-      await for (final entity in from.list(recursive: true)) {
-        if (entity is File) {
-          final rel = p.relative(entity.path, from: from.path);
-          final dest = File(p.join(to.path, rel));
-          await dest.parent.create(recursive: true);
-          await entity.copy(dest.path);
+      await fs.createDir(to);
+      for (final entity in await fs.list(from, recursive: true)) {
+        if (entity.isFile) {
+          final rel = p.relative(entity.path, from: from);
+          await fs.copy(entity.path, p.join(to, rel));
         }
       }
     }
@@ -308,32 +255,24 @@ class BackupManager {
   ///   anotaciones y setlists.
   /// - Devuelve un resumen; lanza si la importación falla.
   Future<ImportBackupReport> importBackup(String sourcePath) async {
-    final tempDir = await getTemporaryDirectory();
-    final extractDir = Directory(p.join(tempDir.path, 'import_extraction_${DateTime.now().millisecondsSinceEpoch}'));
-    final copiedFiles = <File>[];
+    final extractDir = p.join(await fs.tempPath(), 'import_extraction_${DateTime.now().millisecondsSinceEpoch}');
+    final copiedFiles = <String>[];
 
     try {
       AppData.backgroundTaskProgress.value = const BackgroundTaskStatus(0.0, 'Preparando importación...');
-      await extractDir.create(recursive: true);
+      await fs.createDir(extractDir);
 
-      // 1. Unzip en Isolate (Evita OOM)
-      final receivePort = ReceivePort();
-      await Isolate.spawn(
-        _unzipWorker,
-        _UnzipWorkerArgs(zipPath: sourcePath, destPath: extractDir.path, sendPort: receivePort.sendPort),
-        onError: receivePort.sendPort,
-        onExit: receivePort.sendPort,
-      );
-      await _listenWorker(receivePort, 'Descomprimiendo backup...');
+      // 1. Unzip en segundo plano (Evita OOM)
+      await ZipTools.unzipToDir(sourcePath, extractDir, onProgress: _progress('Descomprimiendo backup...'));
 
       // 2. Abrir y validar la DB del backup
-      final dbFile = File(p.join(extractDir.path, 'atril.sqlite'));
-      if (!await dbFile.exists()) throw Exception("Backup inválido (falta la base de datos).");
+      final dbFile = p.join(extractDir, kMainDbFileName);
+      if (!await fs.fileExists(dbFile)) throw Exception("Backup inválido (falta la base de datos).");
       await _validateBackupDb(dbFile);
 
       AppData.backgroundTaskProgress.value = const BackgroundTaskStatus(0.0, 'Procesando datos...');
 
-      final externalDb = AppDatabase(executor: NativeDatabase(dbFile));
+      final externalDb = AppDatabase(executor: openDatabaseAtPath(dbFile));
       try {
         final extFolders = await externalDb.getAllFolders();
         final extDocs = await externalDb.getAllDocs();
@@ -341,7 +280,7 @@ class BackupManager {
         final extSetlists = await externalDb.getAllSetlists();
         final extItems = await externalDb.getAllSetlistItemsOrdered();
 
-        final docsDir = await AppData.storage.getDocsDir();
+        final docsDir = await AppData.storage.getDocsPath();
         final dateStr = DateFormat('yyyy-MM-dd HH:mm').format(DateTime.now());
         final rootImportId = AppData.newFolderId();
 
@@ -363,8 +302,8 @@ class BackupManager {
           }
           final newDocId = AppData.newDocId();
           final newFilename = '$newDocId.pdf';
-          final dest = File(p.join(docsDir.path, newFilename));
-          await source.copy(dest.path);
+          final dest = p.join(docsDir, newFilename);
+          await fs.copy(source, dest);
           copiedFiles.add(dest);
           docIdMap[d.id] = newDocId;
           newRelPath[d.id] = p.join('docs', newFilename);
@@ -485,21 +424,19 @@ class BackupManager {
       debugPrint("Error importando backup: $e");
       // Rollback de archivos copiados si la DB no se confirmó
       for (final f in copiedFiles) {
-        try { if (await f.exists()) await f.delete(); } catch (_) {}
+        try { await fs.deleteFile(f); } catch (_) {}
       }
       rethrow;
     } finally {
       AppData.backgroundTaskProgress.value = null;
-      if (await extractDir.exists()) {
-        try { await extractDir.delete(recursive: true); } catch (_) {}
-      }
+      try { await fs.deleteDir(extractDir); } catch (_) {}
     }
   }
 
   /// Busca el PDF de un doc dentro del backup extraído (ruta guardada o
   /// fallback a docs/<basename>). Nunca sale del directorio extraído.
-  Future<File?> _findBackupPdf(Directory extractDir, String internalRelPath) async {
-    final root = p.normalize(p.absolute(extractDir.path));
+  Future<String?> _findBackupPdf(String extractDir, String internalRelPath) async {
+    final root = p.normalize(extractDir);
     final rel = internalRelPath.replaceAll('\\', '/');
     final candidates = [
       p.normalize(p.join(root, rel)),
@@ -507,8 +444,7 @@ class BackupManager {
     ];
     for (final c in candidates) {
       if (!p.isWithin(root, c)) continue;
-      final f = File(c);
-      if (await f.exists()) return f;
+      if (await fs.fileExists(c)) return c;
     }
     return null;
   }
@@ -520,13 +456,12 @@ class BackupManager {
   /// modifican).
   /// Lanza una excepción si algo falla (la UI decide cómo mostrarla).
   Future<void> exportLibraryToZip({bool includeAnnotations = false}) async {
-    Directory? workDir;
+    String? workDir;
     try {
       // 1. Preparar destino
       final timestamp = DateFormat('yyyyMMdd_HHmm').format(DateTime.now());
       final fileName = 'Biblioteca_Atril_$timestamp.zip';
-      final tempDir = await getTemporaryDirectory();
-      final zipFilePath = p.join(tempDir.path, fileName);
+      final zipFilePath = p.join(await fs.tempPath(), fileName);
       
       // Feedback inmediato
       AppData.backgroundTaskProgress.value = const BackgroundTaskStatus(0.0, 'Escaneando biblioteca...');
@@ -550,8 +485,7 @@ class BackupManager {
 
       for (final score in AppData.library) {
         if (score.filePath == null) continue;
-        final file = File(score.filePath!);
-        if (!await file.exists()) continue;
+        if (!await fs.fileExists(score.filePath!)) continue;
 
         final folderPath = getFolderPath(score.folderId);
         final safeTitle = _sanitizeFilename(score.title);
@@ -589,35 +523,19 @@ class BackupManager {
         }
       }
 
-      // 3. Iniciar Worker
+      // 3. Comprimir (en segundo plano) con progreso
       AppData.backgroundTaskProgress.value = const BackgroundTaskStatus(0.0, 'Exportando...');
-      
-      final receivePort = ReceivePort();
-      await Isolate.spawn(
-        _zipWorker, 
-        _ZipWorkerArgs(
-          zipPath: zipFilePath, 
-          entries: filesToZip, 
-          sendPort: receivePort.sendPort
-        )
+      await ZipTools.zipToFile(
+        zipFilePath,
+        [for (final e in filesToZip) ZipEntrySpec.file(e.sourcePath, e.zipPath)],
+        onProgress: _progress('Exportando a PC...'),
       );
-
-      // 4. Escuchar progreso
-      await for (final message in receivePort) {
-        if (message is double) {
-          AppData.backgroundTaskProgress.value = BackgroundTaskStatus(message, 'Exportando a PC...');
-        } else if (message == 'DONE') {
-           break;
-        } else if (message is String && message.startsWith('ERROR:')) {
-           throw Exception(message);
-        }
-      }
 
       AppData.backgroundTaskProgress.value = null;
       await ExportManager.instance.deleteDirQuietly(workDir);
 
       // 5. Share
-      await Share.shareXFiles([XFile(zipFilePath)], text: 'Exportación de Biblioteca Atril');
+      await shareFiles([ShareFile(zipFilePath)], text: 'Exportación de Biblioteca Atril');
 
     } catch (e) {
       AppData.backgroundTaskProgress.value = null;
@@ -656,92 +574,11 @@ class ImportBackupReport {
   }
 }
 
-// --- ISOLATE WORKER HELPERS ---
+// --- HELPERS ---
 
 class _BackupFileEntry {
   /// Mutable: se reemplaza por la copia aplanada al incluir anotaciones.
   String sourcePath;
   final String zipPath;
   _BackupFileEntry(this.sourcePath, this.zipPath);
-}
-
-class _ZipWorkerArgs {
-  final String zipPath;
-  final List<_BackupFileEntry> entries;
-  final SendPort sendPort;
-  _ZipWorkerArgs({required this.zipPath, required this.entries, required this.sendPort});
-}
-
-Future<void> _zipWorker(_ZipWorkerArgs args) async {
-  try {
-    final encoder = ZipFileEncoder();
-    encoder.create(args.zipPath);
-
-    int count = 0;
-    final total = args.entries.length;
-
-    for (final entry in args.entries) {
-      final file = File(entry.sourcePath);
-      if (await file.exists()) {
-        await encoder.addFile(file, entry.zipPath);
-      }
-      count++;
-      // Reportar progreso
-      args.sendPort.send(count / total);
-    }
-
-    encoder.close();
-    args.sendPort.send('DONE');
-  } catch (e) {
-    args.sendPort.send('ERROR: $e');
-  }
-}
-
-class _UnzipWorkerArgs {
-  final String zipPath;
-  final String destPath;
-  final SendPort sendPort;
-  _UnzipWorkerArgs({required this.zipPath, required this.destPath, required this.sendPort});
-}
-
-Future<void> _unzipWorker(_UnzipWorkerArgs args) async {
-  try {
-    // Usamos InputFileStream para evitar cargar todo el zip a memoria
-    final inputStream = InputFileStream(args.zipPath);
-    final archive = ZipDecoder().decodeBuffer(inputStream);
-
-    final totalFiles = archive.length; 
-    int count = 0;
-    
-    for (final file in archive) {
-      if (file.isFile) {
-         // Protección zip-slip: ninguna entrada puede escribir fuera del destino.
-         final root = p.normalize(p.absolute(args.destPath));
-         final destPath = p.normalize(p.join(root, file.name));
-         if (!p.isWithin(root, destPath)) {
-           count++;
-           continue;
-         }
-         // Asegurar que el directorio padre existe
-         final parentDir = Directory(p.dirname(destPath));
-         if (!await parentDir.exists()) {
-           await parentDir.create(recursive: true);
-         }
-         
-         final outputStream = OutputFileStream(destPath);
-         file.writeContent(outputStream);
-         outputStream.close();
-      }
-      count++;
-      if (count % 10 == 0) { 
-         args.sendPort.send(count / totalFiles);
-      }
-    }
-    
-    inputStream.close();
-    args.sendPort.send('DONE');
-
-  } catch (e) {
-    args.sendPort.send('ERROR: $e');
-  }
 }

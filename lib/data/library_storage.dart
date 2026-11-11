@@ -1,21 +1,24 @@
-import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
-import 'package:path_provider/path_provider.dart';
+
+import '../platform/fs/atril_fs.dart';
 
 /// Handles internal file storage for the Library.
 ///
 /// Core rule: PDFs live inside app-controlled storage (not external URIs).
 /// DB rows store only the *relative* path, e.g. `docs/<docId>.pdf`.
+///
+/// Las rutas son de [AtrilFs]: reales en Android y virtuales en la PWA.
 class LibraryStorage {
   LibraryStorage._();
   static final LibraryStorage instance = LibraryStorage._();
 
-  Directory? _baseDir;
-  Directory? _docsDir;
+  String? _basePath;
+  String? _docsPath;
 
-  Directory get baseDir {
-    final d = _baseDir;
+  /// Directorio base de la biblioteca (`.../atril`).
+  String get basePath {
+    final d = _basePath;
     if (d == null) throw StateError('LibraryStorage not initialized');
     return d;
   }
@@ -23,49 +26,46 @@ class LibraryStorage {
   /// Initializes (and creates if needed) the internal folders.
   /// Idempotente: si ya está inicializado no vuelve a resolver rutas.
   Future<void> init() async {
-    if (_baseDir != null && _docsDir != null) return;
-    final appDir = await getApplicationDocumentsDirectory();
-    final base = Directory(p.join(appDir.path, 'atril'));
-    final docs = Directory(p.join(base.path, 'docs'));
+    if (_basePath != null && _docsPath != null) return;
+    final appDir = await fs.appDocumentsPath();
+    final base = p.join(appDir, 'atril');
+    final docs = p.join(base, 'docs');
 
-    if (!await base.exists()) {
-      await base.create(recursive: true);
-    }
-    if (!await docs.exists()) {
-      await docs.create(recursive: true);
-    }
+    await fs.createDir(base);
+    await fs.createDir(docs);
 
-    _baseDir = base;
-    _docsDir = docs;
+    _basePath = base;
+    _docsPath = docs;
   }
-  
+
   /// Inicializa con un directorio base arbitrario (tests).
   @visibleForTesting
-  void initForTesting(Directory base) {
-    _baseDir = base;
-    _docsDir = Directory(p.join(base.path, 'docs'))..createSync(recursive: true);
+  Future<void> initForTesting(String base) async {
+    _basePath = base;
+    _docsPath = p.join(base, 'docs');
+    await fs.createDir(_docsPath!);
   }
 
-  // Public getter so BackupManager can access it
-  Future<Directory> getDocsDir() async {
-      await init(); // Ensure initialized
-      return _docsDir!;
+  /// Ruta del directorio `docs/` (se usa en backups y limpieza).
+  Future<String> getDocsPath() async {
+    await init(); // Ensure initialized
+    return _docsPath!;
   }
 
   String docRelPath(String docId) => p.join('docs', '$docId.pdf');
 
   String docAbsPath(String docId) {
-    final docs = _docsDir;
+    final docs = _docsPath;
     if (docs == null) {
       throw StateError('LibraryStorage not initialized');
     }
-    return p.join(docs.path, '$docId.pdf');
+    return p.join(docs, '$docId.pdf');
   }
 
   /// Resolves a DB-stored relative path (e.g. `docs/<id>.pdf`) into an
   /// absolute path within internal storage.
   String absPathFromRelPath(String relPath) {
-    return p.join(baseDir.path, relPath);
+    return p.join(basePath, relPath);
   }
 
   /// Copies an existing PDF file into internal storage.
@@ -75,38 +75,27 @@ class LibraryStorage {
     required String docId,
   }) async {
     final destPath = docAbsPath(docId);
-    final src = File(sourcePath);
-    
-    if (!await src.exists()) {
-      throw FileSystemException('No existe el archivo fuente', sourcePath);
+
+    if (!await fs.fileExists(sourcePath)) {
+      throw StateError('No existe el archivo fuente: $sourcePath');
     }
 
     // Write to temp then rename (atomic within same directory).
     final tmpPath = '$destPath.tmp';
-    final tmp = File(tmpPath);
-    if (await tmp.exists()) {
-      await tmp.delete();
-    }
+    await fs.deleteFile(tmpPath);
 
     try {
-      // Intento 1: Copia nativa (rápida)
-      await src.copy(tmpPath);
+      // La implementación nativa ya reintenta con streams si la copia
+      // directa falla (Scoped Storage).
+      await fs.copy(sourcePath, tmpPath);
     } catch (e) {
-      debugPrint('Warning: File.copy failed ($e). Trying manual byte stream copy...');
-      // Intento 2: Copia manual por streams (más robusta en Scoped Storage)
-      try {
-        final inStream = src.openRead();
-        final outSink = tmp.openWrite();
-        await inStream.pipe(outSink); // pipe cierra el sink automáticamente
-      } catch (e2) {
-         debugPrint('Error: Manual stream copy failed too: $e2');
-         // Limpiamos si quedó algo corrupto
-         if (await tmp.exists()) await tmp.delete();
-         rethrow;
-      }
+      debugPrint('Error: no se pudo copiar el PDF importado: $e');
+      // Limpiamos si quedó algo corrupto
+      await fs.deleteFile(tmpPath);
+      rethrow;
     }
 
-    await tmp.rename(destPath);
+    await fs.rename(tmpPath, destPath);
 
     return docRelPath(docId);
   }
