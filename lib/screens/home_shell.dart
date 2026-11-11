@@ -6,6 +6,7 @@ import 'setlists/setlist_detail_screen.dart';
 import 'library/library_screen.dart';
 import 'setlists/setlists_screen.dart';
 import 'settings/settings_screen.dart';
+import '../backup/drive_backup_service.dart';
 import '../data/app_data.dart';
 import '../data/backup_manager.dart';
 import '../data/db/db_connection.dart' show kMainDbFileName;
@@ -29,6 +30,8 @@ class _HomeShellState extends State<HomeShell> {
   void initState() {
     super.initState();
     _setupFileReceiver();
+    // Backup en Drive (si está activado). HomeShell se muestra con AppData listo.
+    DriveBackupService.instance.init();
   }
 
   // ---------------------------------------------------------------------------

@@ -11,6 +11,7 @@ import '../../data/app_data.dart';
 import '../../models/score.dart';
 import '../../models/setlist.dart';
 import '../../platform/pdf_open.dart';
+import '../../backup/drive_backup_service.dart';
 
 /// Modo Vivo: reproducción de un setlist en escena.
 ///
@@ -65,6 +66,7 @@ class _LiveSetlistScreenState extends State<LiveSetlistScreen> {
   @override
   void initState() {
     super.initState();
+    DriveBackupService.liveModeActive.value = true; // no respaldar durante el vivo
     // En escena: pantalla siempre encendida y modo inmersivo.
     AppData.settings.acquireScreenOn();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
@@ -81,6 +83,7 @@ class _LiveSetlistScreenState extends State<LiveSetlistScreen> {
     UsageTracker.instance.stopActivity();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     _focusNode.dispose();
+    DriveBackupService.liveModeActive.value = false;
     super.dispose();
   }
 

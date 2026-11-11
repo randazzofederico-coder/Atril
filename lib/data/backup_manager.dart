@@ -93,7 +93,11 @@ class BackupManager {
   /// 3. Instala lo nuevo y reabre la DB.
   /// 4. Si cualquier paso falla, vuelve a poner la biblioteca anterior.
   /// En todos los casos la DB queda abierta al terminar. Lanza si falla.
-  Future<void> restoreBackup(String sourcePath) async {
+  ///
+  /// Si [extracted] es true, [sourcePath] es un directorio ya armado con la
+  /// misma estructura que el ZIP (`atril.sqlite` + `docs/`), p. ej. un
+  /// backup bajado de Drive; no se descomprime ni se borra.
+  Future<void> restoreBackup(String sourcePath, {bool extracted = false}) async {
     if (!fs.isNative) {
       // En web la base no es un archivo que se pueda mover (ver db_connection_web).
       throw UnsupportedError(
@@ -112,11 +116,15 @@ class BackupManager {
     // 1. Unzip en segundo plano (Evita OOM)
     AppData.backgroundTaskProgress.value = const BackgroundTaskStatus(0.0, 'Verificando y extrayendo backup...');
     
-    final extractDir = p.join(await fs.tempPath(), 'restore_extraction_${DateTime.now().millisecondsSinceEpoch}');
-    await fs.createDir(extractDir);
+    final extractDir = extracted
+        ? sourcePath
+        : p.join(await fs.tempPath(), 'restore_extraction_${DateTime.now().millisecondsSinceEpoch}');
 
     try {
-      await ZipTools.unzipToDir(sourcePath, extractDir, onProgress: _progress('Descomprimiendo para restaurar...'));
+      if (!extracted) {
+        await fs.createDir(extractDir);
+        await ZipTools.unzipToDir(sourcePath, extractDir, onProgress: _progress('Descomprimiendo para restaurar...'));
+      }
 
       // 2. Validar ANTES de tocar la biblioteca actual
       final dbExtracted = p.join(extractDir, kMainDbFileName);
@@ -184,7 +192,7 @@ class BackupManager {
       await PageEditRepository.discardAllUndo();
     } finally {
       AppData.backgroundTaskProgress.value = null;
-      try { await fs.deleteDir(extractDir); } catch (_) {}
+      if (!extracted) { try { await fs.deleteDir(extractDir); } catch (_) {} }
     }
   }
 
@@ -261,16 +269,18 @@ class BackupManager {
   /// - Importa carpetas, partituras (incluidas las de la papelera),
   ///   anotaciones y setlists.
   /// - Devuelve un resumen; lanza si la importación falla.
-  Future<ImportBackupReport> importBackup(String sourcePath) async {
-    final extractDir = p.join(await fs.tempPath(), 'import_extraction_${DateTime.now().millisecondsSinceEpoch}');
+  /// Con [extracted] = true, [sourcePath] es un directorio ya armado (ver [restoreBackup]).
+  /// [folderName]: nombre de la carpeta donde se agrega (por defecto \"Backup Importado (fecha)\").
+  Future<ImportBackupReport> importBackup(String sourcePath, {bool extracted = false, String? folderName}) async {
+    final extractDir = extracted ? sourcePath : p.join(await fs.tempPath(), 'import_extraction_${DateTime.now().millisecondsSinceEpoch}');
     final copiedFiles = <String>[];
 
     try {
       AppData.backgroundTaskProgress.value = const BackgroundTaskStatus(0.0, 'Preparando importación...');
-      await fs.createDir(extractDir);
+      if (!extracted) await fs.createDir(extractDir);
 
       // 1. Unzip en segundo plano (Evita OOM)
-      await ZipTools.unzipToDir(sourcePath, extractDir, onProgress: _progress('Descomprimiendo backup...'));
+      if (!extracted) await ZipTools.unzipToDir(sourcePath, extractDir, onProgress: _progress('Descomprimiendo backup...'));
 
       // 2. Abrir y validar la DB del backup
       final dbFile = p.join(extractDir, kMainDbFileName);
@@ -323,7 +333,7 @@ class BackupManager {
         await AppData.db.transaction(() async {
           await AppData.db.createFolder(
             id: rootImportId,
-            name: "Backup Importado ($dateStr)",
+            name: folderName ?? "Backup Importado ($dateStr)",
             parentId: null, // Raíz
             position: 999, // Al final
           );
@@ -436,7 +446,7 @@ class BackupManager {
       rethrow;
     } finally {
       AppData.backgroundTaskProgress.value = null;
-      try { await fs.deleteDir(extractDir); } catch (_) {}
+      if (!extracted) { try { await fs.deleteDir(extractDir); } catch (_) {} }
     }
   }
 

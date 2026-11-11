@@ -10,6 +10,7 @@ import '../../platform/picked_files.dart';
 import '../../platform/pwa/pwa_install_service.dart';
 import '../../data/app_data.dart';
 import '../trash/trash_bin_screen.dart';
+import 'drive_backup_screen.dart';
 import '../library/export_actions.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -368,6 +369,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Widget _buildDataSection() {
     return Column(
       children: [
+        ListTile(
+          leading: const Icon(Icons.cloud_upload_outlined, color: Colors.blue),
+          title: const Text('Backup en Google Drive'),
+          subtitle: const Text('Respaldo automático en tu Drive, por dispositivo'),
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const DriveBackupScreen()),
+          ),
+        ),
         ListTile(
           leading: const Icon(Icons.file_open_outlined),
           title: const Text('Abrir archivo de Atril'),
