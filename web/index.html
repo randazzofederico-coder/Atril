@@ -1,38 +1,89 @@
 <!DOCTYPE html>
-<html>
+<html lang="es">
 <head>
   <!--
-    If you are serving your web app in a path other than the root, change the
-    href value below to reflect the base path you are serving from.
-
-    The path provided below has to start and end with a slash "/" in order for
-    it to work correctly.
-
-    For more details:
-    * https://developer.mozilla.org/en-US/docs/Web/HTML/Element/base
-
-    This is a placeholder for base href that will be replaced by the value of
-    the `--base-href` argument provided to `flutter build`.
+    The path provided below has to start and end with a slash "/".
+    Placeholder replaced by the `--base-href` argument of `flutter build`
+    (en el sitio: --base-href "/atril/").
   -->
   <base href="$FLUTTER_BASE_HREF">
 
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
-  <meta name="description" content="A new Flutter project.">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Atril: tu biblioteca de partituras PDF, diseñada para el escenario.">
 
-  <!-- iOS meta tags & icons -->
+  <!-- PWA -->
+  <meta name="theme-color" content="#121218">
   <meta name="mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black">
-  <meta name="apple-mobile-web-app-title" content="pdf_setlist">
-  <link rel="apple-touch-icon" href="icons/Icon-192.png">
 
-  <!-- Favicon -->
+  <!-- iOS -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Atril">
+  <link rel="apple-touch-icon" sizes="192x192" href="icons/Icon-192.png">
+  <link rel="apple-touch-icon" sizes="512x512" href="icons/Icon-512.png">
+
   <link rel="icon" type="image/png" href="favicon.png"/>
 
-  <title>pdf_setlist</title>
+  <title>Atril — Partituras</title>
   <link rel="manifest" href="manifest.json">
+
+  <!-- Link previews -->
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Atril">
+  <meta property="og:title" content="Atril — Partituras">
+  <meta property="og:description" content="Tu biblioteca de partituras PDF: carpetas, setlists, anotaciones y modo en vivo.">
+  <meta property="og:image" content="https://federicorandazzo.com.ar/atril/icons/Icon-512.png">
+
+  <style>
+    body {
+      background-color: #121218;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      overflow: hidden;
+    }
+    .loading-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 24px;
+    }
+    .app-icon {
+      width: 90px;
+      height: 90px;
+      border-radius: 20px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    }
+    .loader {
+      border: 3px solid rgba(255, 255, 255, 0.15);
+      border-left-color: #ffffff;
+      border-radius: 50%;
+      width: 36px;
+      height: 36px;
+      animation: spin 1s linear infinite;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+  </style>
 </head>
 <body>
+  <div class="loading-container" id="flutter-loader">
+    <img src="icons/Icon-192.png" alt="Atril" class="app-icon" />
+    <div class="loader"></div>
+  </div>
+  <script>
+    window.addEventListener('flutter-first-frame', function () {
+      var loader = document.getElementById('flutter-loader');
+      if (loader) loader.style.display = 'none';
+    });
+  </script>
   <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>

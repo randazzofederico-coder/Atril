@@ -5,6 +5,8 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../data/backup_manager.dart';
+import '../../platform/picked_files.dart';
+import '../../platform/pwa/pwa_install_service.dart';
 import '../../data/app_data.dart';
 import '../trash/trash_bin_screen.dart';
 import '../library/export_actions.dart';
@@ -78,16 +80,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     if (confirm != true) return;
 
-    final result = await FilePicker.platform.pickFiles(type: FileType.any);
-
-    if (result == null || result.files.single.path == null) return;
+    final result = await FilePicker.platform.pickFiles(type: FileType.any, withData: pickerNeedsData);
+    if (result == null || result.files.isEmpty) return;
+    final paths = await fsPathsForPlatformFiles(result.files);
+    if (paths.isEmpty) return;
     
     if (!mounted) return;
 
     setState(() => _loading = true);
 
     try {
-      await BackupManager.instance.restoreBackup(result.files.single.path!);
+      await BackupManager.instance.restoreBackup(paths.single);
       await AppData.refreshLibrary();
       AppData.triggerNavigationReset();
       
@@ -152,6 +155,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 if (_accountSupported) ...[
                   _buildSectionHeader('Cuenta'),
                   const AccountSection(hasLibrary: false, showHeader: false),
+                  const Divider(),
+                ],
+
+                if (kIsWeb) ...[
+                  _buildSectionHeader('App web'),
+                  _buildWebAppSection(),
                   const Divider(),
                 ],
 
@@ -239,6 +248,45 @@ class _SettingsScreenState extends State<SettingsScreen> {
           color: Theme.of(context).colorScheme.primary,
         ),
       ),
+    );
+  }
+
+  /// Solo web: instalar la PWA y aviso de almacenamiento en iOS.
+  Widget _buildWebAppSection() {
+    final pwa = PwaInstallService();
+    final isIos = defaultTargetPlatform == TargetPlatform.iOS;
+    return ValueListenableBuilder<bool>(
+      valueListenable: pwa.isInstalled,
+      builder: (context, installed, _) {
+        if (installed) {
+          return const ListTile(
+            leading: Icon(Icons.check_circle, color: Colors.green),
+            title: Text('Atril está instalado'),
+            subtitle: Text('Tu biblioteca se guarda en este dispositivo.'),
+          );
+        }
+        return ValueListenableBuilder<bool>(
+          valueListenable: pwa.canInstall,
+          builder: (context, canInstall, _) {
+            if (canInstall) {
+              return ListTile(
+                leading: const Icon(Icons.install_mobile),
+                title: const Text('Instalar Atril'),
+                subtitle: const Text('Abrilo como una app y sin conexión'),
+                onTap: pwa.promptInstall,
+              );
+            }
+            return ListTile(
+              leading: const Icon(Icons.info_outline, color: Colors.orange),
+              title: const Text('Instalá Atril en tu dispositivo'),
+              subtitle: Text(isIos
+                  ? 'En Safari: Compartir → "Agregar a inicio". Si no la instalás, '
+                      'Safari puede borrar tu biblioteca tras unos días sin uso.'
+                  : 'Desde el menú del navegador: "Instalar app" o "Agregar a la pantalla de inicio".'),
+            );
+          },
+        );
+      },
     );
   }
 
@@ -354,14 +402,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _doImport() async {
-    final result = await FilePicker.platform.pickFiles(type: FileType.any);
-    if (result == null || result.files.single.path == null) return;
+    final result = await FilePicker.platform.pickFiles(type: FileType.any, withData: pickerNeedsData);
+    if (result == null || result.files.isEmpty) return;
+    final paths = await fsPathsForPlatformFiles(result.files);
+    if (paths.isEmpty) return;
     
     if (!mounted) return;
 
     setState(() => _loading = true);
     try {
-      final report = await BackupManager.instance.importBackup(result.files.single.path!);
+      final report = await BackupManager.instance.importBackup(paths.single);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('${report.summary} (carpeta "Backup Importado")')),

@@ -3,12 +3,13 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../data/app_data.dart';
+import '../platform/picked_files.dart';
 
 class ScoreImportLogic {
   
   static Future<void> pickAndImportFiles(BuildContext context, String targetFolderId) async {
     // 1. Permisos básicos
-    await [Permission.storage].request();
+    if (!kIsWeb) await [Permission.storage].request();
 
     try {
       // 2. ACTIVAR UI: "Descargando..." (Indeterminado)
@@ -21,6 +22,7 @@ class ScoreImportLogic {
         type: FileType.custom,
         allowedExtensions: ['pdf'],
         allowMultiple: true,
+        withData: pickerNeedsData,
       );
 
       // Si el usuario cancela, volvemos a IDLE
@@ -29,11 +31,7 @@ class ScoreImportLogic {
         return;
       }
 
-      final validPaths = result.files
-          .map((f) => f.path)
-          .where((path) => path != null)
-          .cast<String>()
-          .toList();
+      final validPaths = await fsPathsForPlatformFiles(result.files);
 
       if (validPaths.isEmpty) {
         AppData.importState.value = const ImportState(stage: ImportStage.idle);
@@ -60,6 +58,13 @@ class ScoreImportLogic {
   }
 
   static Future<void> pickAndImportFolder(BuildContext context, String targetFolderId) async {
+    if (kIsWeb) {
+      // El navegador no da acceso a carpetas: se eligen varios PDFs.
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('En la versión web elegí los PDFs con \"Importar archivos\" (podés seleccionar varios).'),
+      ));
+      return;
+    }
     // Permiso especial para Android 10+ (Scoped Storage)
     if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
       var status = await Permission.manageExternalStorage.status;

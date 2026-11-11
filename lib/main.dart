@@ -5,6 +5,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
 import 'screens/home_shell.dart';
 import 'data/app_data.dart';
+import 'platform/pwa/pwa_install_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -27,6 +28,8 @@ void main() async {
   } catch (e) {
     debugPrint('FedeAccount.init falló: $e');
   }
+
+  PwaInstallService().initialize(); // no-op fuera de web
 
   runApp(const AtrilApp());
 }
