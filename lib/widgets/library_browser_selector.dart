@@ -142,6 +142,8 @@ class LibraryBrowserSelector extends StatelessWidget {
         onSelected: (action) => onFolderAction!(f.id, action),
         itemBuilder: (context) => const [
           PopupMenuItem(value: 'rename', child: Text('Renombrar')),
+          PopupMenuItem(value: 'share_zip', child: Text('Compartir como ZIP')),
+          PopupMenuItem(value: 'share_atril', child: Text('Compartir como .atrilfolder')),
           PopupMenuItem(value: 'delete', child: Text('Eliminar', style: TextStyle(color: Colors.red))),
         ],
       );

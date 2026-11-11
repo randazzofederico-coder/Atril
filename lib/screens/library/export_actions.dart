@@ -2,9 +2,12 @@ import 'package:flutter/material.dart';
 
 import '../../data/app_data.dart';
 import '../../data/backup_manager.dart';
+import '../../data/folder_share_manager.dart';
 import '../../models/score.dart';
 import '../../models/setlist.dart';
 import '../../widgets/export_options_dialog.dart';
+
+export '../../data/folder_share_manager.dart' show FolderExportFormat;
 
 /// Flujos de UI para compartir/exportar con o sin anotaciones.
 ///
@@ -57,6 +60,42 @@ class ExportActions {
         include = choice;
       }
       await AppData.shareSetlist(setlist, format: format, includeAnnotations: include);
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('Error al compartir: $e')));
+    }
+  }
+
+  /// Comparte una carpeta (con subcarpetas) en el [format] indicado.
+  static Future<void> shareFolder(
+    BuildContext context,
+    String folderId,
+    FolderExportFormat format,
+  ) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final folder = AppData.getFolderById(folderId);
+    if (folder == null) return;
+    try {
+      var include = false;
+      final ids = LibraryRepository.getRecursiveFolderIds(folderId);
+      final docIds = AppData.library.where((s) => ids.contains(s.folderId)).map((s) => s.docId);
+      if (await AppData.anyHasAnnotations(docIds)) {
+        if (!context.mounted) return;
+        final choice = await askIncludeAnnotations(
+          context,
+          title: 'Compartir "${folder.name}"',
+          withSubtitle: format == FolderExportFormat.atrilFolder
+              ? 'Se importan editables en Atril'
+              : 'Las anotaciones quedan dibujadas en los PDFs',
+          withoutSubtitle: 'PDFs originales, tal como fueron importados',
+        );
+        if (choice == null) return;
+        include = choice;
+      }
+      await FolderShareManager.instance.shareFolder(
+        folderId,
+        format: format,
+        includeAnnotations: include,
+      );
     } catch (e) {
       messenger.showSnackBar(SnackBar(content: Text('Error al compartir: $e')));
     }

@@ -5,6 +5,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../data/backup_manager.dart';
+import '../../data/file_receiver_channel.dart';
 import '../../platform/picked_files.dart';
 import '../../platform/pwa/pwa_install_service.dart';
 import '../../data/app_data.dart';
@@ -251,6 +252,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  /// Abre un .atrilfolder/.setlist/.atril elegido a mano (en web es la única
+  /// forma de recibirlos). Lo procesa HomeShell, igual que si llegara desde
+  /// otra app.
+  Future<void> _openAtrilFile() async {
+    final handler = FileReceiverChannel.onFileReceived;
+    if (handler == null) return;
+    final result = await FilePicker.platform.pickFiles(type: FileType.any, withData: pickerNeedsData);
+    if (result == null || result.files.isEmpty) return;
+    final paths = await fsPathsForPlatformFiles(result.files);
+    if (paths.isEmpty || !mounted) return;
+    Navigator.pop(context); // volver a la biblioteca: ahí se ve el resultado
+    handler(paths.single);
+  }
+
   /// Solo web: instalar la PWA y aviso de almacenamiento en iOS.
   Widget _buildWebAppSection() {
     final pwa = PwaInstallService();
@@ -353,6 +368,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Widget _buildDataSection() {
     return Column(
       children: [
+        ListTile(
+          leading: const Icon(Icons.file_open_outlined),
+          title: const Text('Abrir archivo de Atril'),
+          subtitle: const Text('Carpeta (.atrilfolder), setlist (.setlist) o backup (.atril)'),
+          onTap: _openAtrilFile,
+        ),
         ListTile(
           leading: const Icon(Icons.drive_file_move_outline),
           title: const Text('Exportar para PC'),

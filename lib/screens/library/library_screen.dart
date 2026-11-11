@@ -316,6 +316,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
                 onFolderAction: (folderId, action) {
                    if (action == 'rename') LibraryActions.renameFolder(context, folderId);
                    if (action == 'delete') LibraryActions.deleteFolderSingle(context, folderId);
+                   if (action == 'share_zip') ExportActions.shareFolder(context, folderId, FolderExportFormat.zip);
+                   if (action == 'share_atril') ExportActions.shareFolder(context, folderId, FolderExportFormat.atrilFolder);
                 },
                 
                 onDocAction: (docId, action) {

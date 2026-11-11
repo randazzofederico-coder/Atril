@@ -11,10 +11,14 @@ class FolderPickerScreen extends StatefulWidget {
   /// Título de la acción (ej: "Mover 3 items")
   final String actionTitle;
 
+  /// Texto del botón de confirmación.
+  final String confirmLabel;
+
   const FolderPickerScreen({
     super.key,
     required this.ignoreFolderIds,
     this.actionTitle = 'Mover items',
+    this.confirmLabel = 'Mover aquí',
   });
 
   @override
@@ -104,7 +108,7 @@ class _FolderPickerScreenState extends State<FolderPickerScreen> {
               style: FilledButton.styleFrom(
                 visualDensity: VisualDensity.compact,
               ),
-              child: const Text('Mover aquí'),
+              child: Text(widget.confirmLabel),
             ),
             const SizedBox(width: 12),
           ],

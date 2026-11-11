@@ -10,6 +10,8 @@ import '../data/app_data.dart';
 import '../data/backup_manager.dart';
 import '../data/db/db_connection.dart' show kMainDbFileName;
 import '../data/file_receiver_channel.dart';
+import '../data/folder_share_manager.dart';
+import 'library/folder_picker_screen.dart';
 import '../platform/zip/zip_tools.dart';
 
 class HomeShell extends StatefulWidget {
@@ -52,7 +54,9 @@ class _HomeShellState extends State<HomeShell> {
     final fileType = await _detectFileType(path);
     debugPrint('[HomeShell] Tipo detectado: $fileType');
 
-    if (fileType == 'setlist') {
+    if (fileType == 'atrilfolder') {
+      await _importAtrilFolderFile(path);
+    } else if (fileType == 'setlist') {
       await _importSetlistFile(path);
     } else if (fileType == 'atril' || ext == '.atril') {
       if (!mounted) return;
@@ -75,7 +79,8 @@ class _HomeShellState extends State<HomeShell> {
       final names = await ZipTools.listEntryNames(path);
       if (names == null) return null;
 
-      // Es un ZIP — verificar si contiene data.json (= setlist)
+      // Es un ZIP — carpeta compartida (folder.json) o setlist (data.json)
+      if (names.contains(FolderShareManager.metadataName)) return 'atrilfolder';
       if (names.contains('data.json')) return 'setlist';
       // Solo es un backup si trae la base de datos de Atril
       if (!names.contains(kMainDbFileName)) return null;
@@ -113,6 +118,30 @@ class _HomeShellState extends State<HomeShell> {
       messenger.showSnackBar(
         SnackBar(content: Text('Error importando backup: $e'), backgroundColor: Colors.red),
       );
+    }
+  }
+
+  /// Carpeta compartida (.atrilfolder): el usuario elige dónde ubicarla.
+  Future<void> _importAtrilFolderFile(String filePath) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final targetId = await Navigator.of(context).push<String>(
+      MaterialPageRoute(
+        builder: (_) => const FolderPickerScreen(
+          ignoreFolderIds: [],
+          actionTitle: 'Importar carpeta',
+          confirmLabel: 'Importar aquí',
+        ),
+      ),
+    );
+    if (targetId == null || !mounted) return;
+    try {
+      final folderId = await FolderShareManager.instance.importAtrilFolder(filePath, targetId);
+      if (!mounted) return;
+      setState(() => _index = 0); // tab Biblioteca
+      final name = AppData.getFolderById(folderId)?.name ?? 'Carpeta';
+      messenger.showSnackBar(SnackBar(content: Text('Carpeta "$name" importada.')));
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('Error importando carpeta: $e')));
     }
   }
 

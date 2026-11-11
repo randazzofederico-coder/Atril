@@ -35,7 +35,7 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
 
-            <!-- Abrir archivos .setlist y .atril desde otras apps (ACTION_VIEW) -->
+            <!-- Abrir archivos .setlist, .atril y .atrilfolder desde otras apps (ACTION_VIEW) -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW"/>
                 <category android:name="android.intent.category.DEFAULT"/>
@@ -49,6 +49,9 @@
                 <data android:pathPattern=".*\\..*\\..*\\.setlist"/>
                 <data android:pathPattern=".*\\..*\\.atril"/>
                 <data android:pathPattern=".*\\..*\\..*\\.atril"/>
+                <data android:pathPattern=".*\\.atrilfolder"/>
+                <data android:pathPattern=".*\\..*\\.atrilfolder"/>
+                <data android:pathPattern=".*\\..*\\..*\\.atrilfolder"/>
             </intent-filter>
 
             <!-- Recibir archivos .setlist y .atril compartidos (ACTION_SEND) -->
