@@ -134,23 +134,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
         return Scaffold(
         appBar: AppBar(title: const Text('Configuración')),
-        body: isBusy 
-          ? Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                   const CircularProgressIndicator(),
-                   const SizedBox(height: 16),
-                   if (taskStatus != null) ...[
-                      Text(taskStatus.message),
-                      const SizedBox(height: 8),
-                      Text(taskStatus.percentage),
-                   ] else 
-                      const Text('Cargando...'),
-                ],
-              ),
-            )
-          : ListView(
+        // Las tareas largas (backup, exportar...) no bloquean Ajustes: el
+        // progreso se muestra arriba y solo se desactiva la sección Datos.
+        body: Column(
+          children: [
+            if (isBusy) _buildBusyBanner(taskStatus),
+            Expanded(
+              child: ListView(
               children: [
                 // Cuenta del ecosistema: OPCIONAL. Sin cuenta todo funciona
                 // igual (la biblioteca es local).
@@ -175,7 +165,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 const Divider(),
 
                 _buildSectionHeader('Datos'),
-                _buildDataSection(),
+                IgnorePointer(
+                  ignoring: isBusy,
+                  child: Opacity(opacity: isBusy ? 0.4 : 1, child: _buildDataSection()),
+                ),
                 const Divider(),
 
                 _buildSectionHeader('Papelera'),
@@ -252,8 +245,37 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
               ],
             ),
+            ),
+          ],
+        ),
       );
       } 
+    );
+  }
+
+  Widget _buildBusyBanner(BackgroundTaskStatus? status) {
+    return Material(
+      color: Theme.of(context).colorScheme.surfaceContainerHighest,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          LinearProgressIndicator(
+            value: status == null || status.indeterminate ? null : status.progress,
+            minHeight: 3,
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Text(
+              status == null
+                  ? 'Trabajando...'
+                  : status.indeterminate
+                      ? status.message
+                      : '${status.message}  ${status.percentage}',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ),
+        ],
+      ),
     );
   }
 
