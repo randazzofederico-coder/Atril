@@ -66,24 +66,40 @@ Future<void> unzipToDir(
   String destDir, {
   void Function(double progress)? onProgress,
 }) async {
-  final archive = ZipDecoder().decodeBytes(await fs.readBytes(zipPath));
+  final sw = Stopwatch()..start();
+  // Se lee el directorio central y cada entrada a mano: ArchiveFile.content
+  // usa el zlib "nativo" de la plataforma, que no existe en WebAssembly
+  // ("inflateBuffer requires html or io"). Inflate es Dart puro.
+  final dir = ZipDirectory.read(InputStream(await fs.readBytes(zipPath)));
   final root = p.normalize(destDir);
-  final total = archive.length;
+  final total = dir.fileHeaders.length;
+  diag('unzip: $total entradas desde $zipPath');
   var count = 0;
-  for (final file in archive) {
-    if (file.isFile) {
+  for (final header in dir.fileHeaders) {
+    final zf = header.file;
+    final name = header.filename;
+    if (zf != null && !name.endsWith('/')) {
       // Protección zip-slip: ninguna entrada puede escribir fuera del destino.
-      final destPath = p.normalize(p.join(root, file.name));
+      final destPath = p.normalize(p.join(root, name));
       if (p.isWithin(root, destPath)) {
-        await fs.writeBytes(destPath, file.content as List<int>);
+        await fs.writeBytes(destPath, _entryBytes(zf));
       }
     }
     count++;
-    if (count % 5 == 0 || count == total) {
-      onProgress?.call(count / total);
-      await Future<void>.delayed(Duration.zero);
-    }
+    onProgress?.call(total == 0 ? 1.0 : count / total);
+    await Future<void>.delayed(Duration.zero);
   }
+  diag('unzip: listo en ${sw.elapsedMilliseconds} ms');
+}
+
+/// Contenido de una entrada, descomprimiendo con el Inflate de Dart puro.
+List<int> _entryBytes(ZipFile zf) {
+  final raw = zf.rawContent;
+  if (raw == null) return zf.content;
+  if (zf.compressionMethod == ZipFile.zipCompressionDeflate) {
+    return Inflate.buffer(raw, zf.uncompressedSize).getBytes();
+  }
+  return raw.toUint8List();
 }
 
 /// Salida del encoder que va pasando bloques de ~4 MB al lado JS (partes del
