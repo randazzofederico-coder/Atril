@@ -50,7 +50,7 @@ class ScoreImportLogic {
     if (kIsWeb) {
       // El navegador no da acceso a carpetas: se eligen varios PDFs.
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('En la versión web no se pueden importar carpetas: usá \"Importar archivos\" (podés elegir varios a la vez).'),
+        content: Text('En la versión web no se pueden importar carpetas: usá "Importar archivos" (podés elegir varios a la vez).'),
       ));
       return;
     }
