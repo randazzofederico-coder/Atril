@@ -228,11 +228,12 @@ class _ZipSource {
   }
 }
 
-/// Salida del encoder que va pasando bloques de ~4 MB al lado JS (partes del
-/// Blob) para no acumular el ZIP entero en memoria de Dart.
+/// Salida del encoder que convierte cada bloque (~4 MB, o un PDF entero) en
+/// un Blob del navegador apenas se escribe. Chrome guarda los Blobs grandes
+/// en disco: así el ZIP nunca está entero en memoria (ni en Dart ni en JS).
 class _BlobOutput extends OutputStreamBase {
   static const _chunk = 4 * 1024 * 1024;
-  final List<JSUint8Array> parts = [];
+  final List<web.Blob> parts = [];
   final Uint8List _buf = Uint8List(_chunk);
   int _pos = 0;
   int _length = 0;
@@ -243,7 +244,8 @@ class _BlobOutput extends OutputStreamBase {
   @override
   void flush() {
     if (_pos == 0) return;
-    parts.add(Uint8List.fromList(Uint8List.sublistView(_buf, 0, _pos)).toJS);
+    // El Blob copia los bytes al crearse: el búfer se puede reutilizar.
+    parts.add(_blobOf(Uint8List.sublistView(_buf, 0, _pos)));
     _pos = 0;
   }
 
@@ -261,7 +263,7 @@ class _BlobOutput extends OutputStreamBase {
       flush();
       final view = bytes is Uint8List ? Uint8List.sublistView(bytes, 0, len) : Uint8List.fromList(bytes.sublist(0, len));
       // Bloque grande (un PDF): directo como parte propia.
-      parts.add(view.toJS);
+      parts.add(_blobOf(view));
       _length += len;
       return;
     }
@@ -270,6 +272,8 @@ class _BlobOutput extends OutputStreamBase {
     _pos += len;
     _length += len;
   }
+
+  static web.Blob _blobOf(Uint8List bytes) => web.Blob([bytes.toJS].toJS);
 
   @override
   void writeInputStream(InputStreamBase stream) => writeBytes(stream.toUint8List());
