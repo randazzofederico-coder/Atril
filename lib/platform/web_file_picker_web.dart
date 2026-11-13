@@ -5,8 +5,13 @@ import 'dart:typed_data';
 import 'package:web/web.dart' as web;
 
 import 'picked_file.dart';
+import 'web_blobs.dart';
 
 Completer<List<web.File>>? _pending;
+
+/// Registra un archivo elegido para leerlo por partes desde [path] (ver
+/// [webBlobs]); no se copia nada.
+void registerPickedHandle(String path, Object handle) => webBlobs[path] = handle as web.Blob;
 
 /// Abandona la selección en curso (el usuario tocó "Cancelar" mientras
 /// esperaba a Drive). Si el archivo llega después, se ignora.
@@ -76,7 +81,7 @@ Future<List<PickedFile>> pickFilesWeb({
 
   return completer.future.then((files) => [
         for (final f in files)
-          PickedFile(f.name, f.size, (onBytes) => _readWithProgress(f, onBytes)),
+          PickedFile(f.name, f.size, (onBytes) => _readWithProgress(f, onBytes), handle: f),
       ]);
 }
 

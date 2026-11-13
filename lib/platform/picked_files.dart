@@ -38,6 +38,21 @@ Future<List<String>> pickFilesToFs(
         : '.atril,.setlist,.atrilfolder,.zip,application/zip,'
             'application/x-zip-compressed,application/octet-stream';
     final picked = await pickFilesWeb(accept: accept, multiple: multiple, onWaiting: onWaiting);
+    if (kind == PickKind.atrilFile) {
+      // Backups/paquetes (pueden pesar cientos de MB): no se copian. Se
+      // registra el archivo del navegador y ZipTools lo lee por partes.
+      final out = <String>[];
+      for (final f in picked) {
+        final path = p.join(
+          await fs.tempPath(),
+          'atril_pick_${DateTime.now().microsecondsSinceEpoch}',
+          f.name.isEmpty ? 'archivo' : f.name,
+        );
+        registerPickedHandle(path, f.handle!);
+        out.add(path);
+      }
+      return out;
+    }
     final totalBytes = picked.fold<int>(0, (a, f) => a + f.size);
     var doneBytes = 0;
     final out = <String>[];

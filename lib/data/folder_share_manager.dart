@@ -215,7 +215,8 @@ class FolderShareManager {
 
         final docId = AppData.newDocId();
         final dest = p.join(docsDir, '$docId.pdf');
-        await fs.copy(source, dest);
+        // Web: mover desde el temporal de extracción (no duplica los bytes).
+        await (fs.isNative ? fs.copy(source, dest) : fs.rename(source, dest));
         copiedFiles.add(dest);
         pending.add(_PendingDoc(
           docId: docId,

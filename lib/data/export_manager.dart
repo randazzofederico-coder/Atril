@@ -361,7 +361,8 @@ class ExportManager {
         final newDocId = AppData.newDocId();
         final newFilename = '$newDocId.pdf';
         final destFile = p.join(docsDir, newFilename);
-        await fs.copy(sourceFile, destFile);
+        // Web: mover desde el temporal de extracción (no duplica los bytes).
+        await (fs.isNative ? fs.copy(sourceFile, destFile) : fs.rename(sourceFile, destFile));
         copiedFiles.add(destFile);
 
         pending.add(_PendingSetlistDoc(

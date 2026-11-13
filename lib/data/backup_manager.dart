@@ -324,7 +324,8 @@ class BackupManager {
           final newDocId = AppData.newDocId();
           final newFilename = '$newDocId.pdf';
           final dest = p.join(docsDir, newFilename);
-          await fs.copy(source, dest);
+          // Web: mover desde el temporal de extracción (no duplica los bytes).
+          await (fs.isNative ? fs.copy(source, dest) : fs.rename(source, dest));
           copiedFiles.add(dest);
           docIdMap[d.id] = newDocId;
           newRelPath[d.id] = p.join('docs', newFilename);

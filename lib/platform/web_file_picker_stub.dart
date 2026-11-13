@@ -9,3 +9,5 @@ Future<List<PickedFile>> pickFilesWeb({
     throw UnsupportedError('pickFilesWeb solo está disponible en web');
 
 void cancelPendingPick() {}
+
+void registerPickedHandle(String path, Object handle) {}

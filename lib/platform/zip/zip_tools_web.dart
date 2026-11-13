@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:js_interop';
 import 'dart:typed_data';
 
@@ -54,11 +55,10 @@ Future<void> zipToFile(
 }
 
 Future<List<String>?> listEntryNames(String zipPath) async {
-  if (!await fs.fileExists(zipPath)) return null;
-  final bytes = await fs.readBytes(zipPath);
-  if (bytes.length < 4 || bytes[0] != 0x50 || bytes[1] != 0x4B) return null;
-  final archive = ZipDecoder().decodeBytes(bytes);
-  return [for (final entry in archive) entry.name];
+  final src = await _ZipSource.open(zipPath);
+  if (src == null) return null;
+  final entries = await src.entries();
+  return entries == null ? null : [for (final e in entries) e.name];
 }
 
 Future<void> unzipToDir(
@@ -67,39 +67,165 @@ Future<void> unzipToDir(
   void Function(double progress)? onProgress,
 }) async {
   final sw = Stopwatch()..start();
-  // Se lee el directorio central y cada entrada a mano: ArchiveFile.content
-  // usa el zlib "nativo" de la plataforma, que no existe en WebAssembly
-  // ("inflateBuffer requires html or io"). Inflate es Dart puro.
-  final dir = ZipDirectory.read(InputStream(await fs.readBytes(zipPath)));
+  final src = await _ZipSource.open(zipPath);
+  if (src == null) throw Exception('No se encontró el archivo.');
+  // Se lee el índice (al final del ZIP) y después cada entrada por separado:
+  // nunca está el ZIP entero en memoria (backups de cientos de MB).
+  final entries = await src.entries();
+  if (entries == null) throw Exception('El archivo no es un ZIP válido.');
   final root = p.normalize(destDir);
-  final total = dir.fileHeaders.length;
-  diag('unzip: $total entradas desde $zipPath');
+  diag('unzip: ${entries.length} entradas desde $zipPath (${(src.size / 1048576).toStringAsFixed(1)} MB)');
   var count = 0;
-  for (final header in dir.fileHeaders) {
-    final zf = header.file;
-    final name = header.filename;
-    if (zf != null && !name.endsWith('/')) {
+  for (final e in entries) {
+    if (!e.name.endsWith('/')) {
       // Protección zip-slip: ninguna entrada puede escribir fuera del destino.
-      final destPath = p.normalize(p.join(root, name));
+      final destPath = p.normalize(p.join(root, e.name));
       if (p.isWithin(root, destPath)) {
-        await fs.writeBytes(destPath, _entryBytes(zf));
+        final bytes = await src.read(e);
+        await fs.writeBytes(destPath, bytes);
+        diag('unzip: ${e.name} (${(bytes.length / 1048576).toStringAsFixed(1)} MB) en ${sw.elapsedMilliseconds} ms');
       }
     }
     count++;
-    onProgress?.call(total == 0 ? 1.0 : count / total);
+    onProgress?.call(entries.isEmpty ? 1.0 : count / entries.length);
     await Future<void>.delayed(Duration.zero);
   }
   diag('unzip: listo en ${sw.elapsedMilliseconds} ms');
 }
 
-/// Contenido de una entrada, descomprimiendo con el Inflate de Dart puro.
-List<int> _entryBytes(ZipFile zf) {
-  final raw = zf.rawContent;
-  if (raw == null) return zf.content;
-  if (zf.compressionMethod == ZipFile.zipCompressionDeflate) {
-    return Inflate.buffer(raw, zf.uncompressedSize).getBytes();
+class _ZipEntry {
+  final String name;
+  final int method;
+  final int compressedSize;
+  final int uncompressedSize;
+  final int localHeaderOffset;
+  _ZipEntry(this.name, this.method, this.compressedSize, this.uncompressedSize, this.localHeaderOffset);
+}
+
+/// ZIP leído por partes: desde un archivo del navegador ([webBlobs]) con
+/// `slice`, o desde AtrilFs (en memoria; archivos chicos).
+class _ZipSource {
+  final web.Blob? _blob;
+  final Uint8List? _bytes;
+  final int size;
+  _ZipSource._(this._blob, this._bytes, this.size);
+
+  static Future<_ZipSource?> open(String path) async {
+    final blob = webBlobs[path];
+    if (blob != null) return _ZipSource._(blob, null, blob.size);
+    if (!await fs.fileExists(path)) return null;
+    final bytes = await fs.readBytes(path);
+    return _ZipSource._(null, bytes, bytes.length);
   }
-  return raw.toUint8List();
+
+  Future<Uint8List> _range(int start, int end) async {
+    end = end.clamp(0, size);
+    start = start.clamp(0, end);
+    final b = _bytes;
+    if (b != null) return Uint8List.sublistView(b, start, end);
+    final buffer = await _blob!.slice(start, end).arrayBuffer().toDart;
+    return buffer.toDart.asUint8List();
+  }
+
+  /// Entradas del directorio central, o null si no es un ZIP.
+  Future<List<_ZipEntry>?> entries() async {
+    if (size < 22) return null;
+    final head = await _range(0, 4);
+    if (head[0] != 0x50 || head[1] != 0x4B) return null;
+
+    // Fin del directorio central (EOCD): en los últimos 64 KB + 22 bytes.
+    final tailStart = size - 65557 < 0 ? 0 : size - 65557;
+    final tail = await _range(tailStart, size);
+    final td = ByteData.sublistView(tail);
+    var eocd = -1;
+    for (var i = tail.length - 22; i >= 0; i--) {
+      if (td.getUint32(i, Endian.little) == 0x06054b50) {
+        eocd = i;
+        break;
+      }
+    }
+    if (eocd < 0) return null;
+    var count = td.getUint16(eocd + 10, Endian.little);
+    var cdSize = td.getUint32(eocd + 12, Endian.little);
+    var cdOffset = td.getUint32(eocd + 16, Endian.little);
+
+    // ZIP64 (más de 4 GB o 65535 entradas)
+    if ((cdOffset == 0xffffffff || cdSize == 0xffffffff || count == 0xffff) && eocd >= 20) {
+      if (td.getUint32(eocd - 20, Endian.little) == 0x07064b50) {
+        final recOffset = td.getUint64(eocd - 20 + 8, Endian.little);
+        final rec = ByteData.sublistView(await _range(recOffset, recOffset + 56));
+        if (rec.getUint32(0, Endian.little) == 0x06064b50) {
+          count = rec.getUint64(32, Endian.little);
+          cdSize = rec.getUint64(40, Endian.little);
+          cdOffset = rec.getUint64(48, Endian.little);
+        }
+      }
+    }
+
+    final cd = await _range(cdOffset, cdOffset + cdSize);
+    final d = ByteData.sublistView(cd);
+    final out = <_ZipEntry>[];
+    var pos = 0;
+    for (var i = 0; i < count && pos + 46 <= cd.length; i++) {
+      if (d.getUint32(pos, Endian.little) != 0x02014b50) break;
+      final flags = d.getUint16(pos + 8, Endian.little);
+      final method = d.getUint16(pos + 10, Endian.little);
+      var comp = d.getUint32(pos + 20, Endian.little);
+      var uncomp = d.getUint32(pos + 24, Endian.little);
+      final nameLen = d.getUint16(pos + 28, Endian.little);
+      final extraLen = d.getUint16(pos + 30, Endian.little);
+      final commentLen = d.getUint16(pos + 32, Endian.little);
+      var offset = d.getUint32(pos + 42, Endian.little);
+      final nameBytes = Uint8List.sublistView(cd, pos + 46, pos + 46 + nameLen);
+      final name = (flags & 0x800) != 0
+          ? utf8.decode(nameBytes, allowMalformed: true)
+          : latin1.decode(nameBytes);
+
+      // Campo extra ZIP64: valores de 8 bytes para los que valen 0xFFFFFFFF.
+      var e = pos + 46 + nameLen;
+      final extraEnd = e + extraLen;
+      while (e + 4 <= extraEnd) {
+        final id = d.getUint16(e, Endian.little);
+        final len = d.getUint16(e + 2, Endian.little);
+        if (id == 0x0001) {
+          var q = e + 4;
+          if (uncomp == 0xffffffff) {
+            uncomp = d.getUint64(q, Endian.little);
+            q += 8;
+          }
+          if (comp == 0xffffffff) {
+            comp = d.getUint64(q, Endian.little);
+            q += 8;
+          }
+          if (offset == 0xffffffff) offset = d.getUint64(q, Endian.little);
+        }
+        e += 4 + len;
+      }
+
+      out.add(_ZipEntry(name, method, comp, uncomp, offset));
+      pos += 46 + nameLen + extraLen + commentLen;
+    }
+    return out;
+  }
+
+  /// Contenido de una entrada (descomprimido con el Inflate de Dart puro:
+  /// en WebAssembly no hay zlib nativo).
+  Future<List<int>> read(_ZipEntry e) async {
+    final lh = ByteData.sublistView(await _range(e.localHeaderOffset, e.localHeaderOffset + 30));
+    if (lh.getUint32(0, Endian.little) != 0x04034b50) {
+      throw Exception('ZIP dañado (${e.name}).');
+    }
+    final start = e.localHeaderOffset + 30 + lh.getUint16(26, Endian.little) + lh.getUint16(28, Endian.little);
+    final data = await _range(start, start + e.compressedSize);
+    switch (e.method) {
+      case 0:
+        return data;
+      case 8:
+        return Inflate.buffer(InputStream(data), e.uncompressedSize).getBytes();
+      default:
+        throw Exception('Compresión no soportada en ${e.name} (método ${e.method}).');
+    }
+  }
 }
 
 /// Salida del encoder que va pasando bloques de ~4 MB al lado JS (partes del
