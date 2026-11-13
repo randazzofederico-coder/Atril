@@ -7,6 +7,7 @@ import 'screens/home_shell.dart';
 import 'data/app_data.dart';
 import 'platform/diag_log.dart';
 import 'platform/pwa/pwa_install_service.dart';
+import 'platform/root_messenger.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -84,6 +85,7 @@ class AtrilApp extends StatelessWidget {
             final scale = AppData.settings.uiScale.value;
             return MaterialApp(
               title: 'Atril',
+              scaffoldMessengerKey: rootMessengerKey,
               debugShowCheckedModeBanner: false,
               // La UI está en español: los textos del ecosistema
               // (FacStrings) y los de Material siguen el mismo idioma.
