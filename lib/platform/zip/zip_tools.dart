@@ -40,4 +40,14 @@ class ZipTools {
   /// un ZIP (no tiene la cabecera `PK`).
   static Future<List<String>?> listEntryNames(String zipPath) =>
       impl.listEntryNames(zipPath);
+
+  /// Extrae solo las entradas de [targets] (nombre en el ZIP → ruta destino),
+  /// cada una directo a su destino final (sin carpeta temporal intermedia).
+  /// Las que no están en el ZIP se ignoran.
+  static Future<void> extractEntries(
+    String zipPath,
+    Map<String, String> targets, {
+    void Function(double progress)? onProgress,
+  }) =>
+      impl.extractEntries(zipPath, targets, onProgress: onProgress);
 }

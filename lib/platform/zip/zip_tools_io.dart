@@ -26,6 +26,43 @@ Future<void> unzipToDir(
   return _runWorker(_unzipWorker, _UnzipArgs(zipPath, destDir), onProgress);
 }
 
+Future<void> extractEntries(
+  String zipPath,
+  Map<String, String> targets, {
+  void Function(double progress)? onProgress,
+}) {
+  return _runWorker(_extractWorker, _ExtractArgs(zipPath, targets), onProgress);
+}
+
+class _ExtractArgs extends _Args {
+  final String zipPath;
+  final Map<String, String> targets;
+  _ExtractArgs(this.zipPath, this.targets);
+}
+
+Future<void> _extractWorker(_ExtractArgs args) async {
+  try {
+    final inputStream = InputFileStream(args.zipPath);
+    final archive = ZipDecoder().decodeBuffer(inputStream);
+    final total = args.targets.length;
+    var count = 0;
+    for (final file in archive) {
+      final dest = args.targets[file.name];
+      if (dest == null || !file.isFile) continue;
+      await Directory(p.dirname(dest)).create(recursive: true);
+      final out = OutputFileStream(dest);
+      file.writeContent(out);
+      await out.close();
+      count++;
+      args.sendPort.send(total == 0 ? 1.0 : count / total);
+    }
+    await inputStream.close();
+    args.sendPort.send('DONE');
+  } catch (e) {
+    args.sendPort.send('ERROR: $e');
+  }
+}
+
 Future<List<String>?> listEntryNames(String zipPath) async {
   final file = File(zipPath);
   if (!await file.exists()) return null;

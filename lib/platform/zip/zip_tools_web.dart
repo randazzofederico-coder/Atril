@@ -61,6 +61,28 @@ Future<List<String>?> listEntryNames(String zipPath) async {
   return entries == null ? null : [for (final e in entries) e.name];
 }
 
+Future<void> extractEntries(
+  String zipPath,
+  Map<String, String> targets, {
+  void Function(double progress)? onProgress,
+}) async {
+  final sw = Stopwatch()..start();
+  final src = await _ZipSource.open(zipPath);
+  if (src == null) throw Exception('No se encontró el archivo.');
+  final entries = await src.entries();
+  if (entries == null) throw Exception('El archivo no es un ZIP válido.');
+  final wanted = entries.where((e) => targets.containsKey(e.name)).toList();
+  var count = 0;
+  for (final e in wanted) {
+    final bytes = await src.read(e);
+    await fs.writeBytes(targets[e.name]!, bytes);
+    count++;
+    diag('extraer: ${e.name} (${(bytes.length / 1048576).toStringAsFixed(1)} MB) en ${sw.elapsedMilliseconds} ms');
+    onProgress?.call(count / wanted.length);
+    await Future<void>.delayed(Duration.zero);
+  }
+}
+
 Future<void> unzipToDir(
   String zipPath,
   String destDir, {

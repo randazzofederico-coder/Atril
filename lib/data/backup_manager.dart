@@ -274,7 +274,7 @@ class BackupManager {
   ///   anotaciones y setlists.
   /// - Devuelve un resumen; lanza si la importación falla.
   /// Con [extracted] = true, [sourcePath] es un directorio ya armado (ver [restoreBackup]).
-  /// [folderName]: nombre de la carpeta donde se agrega (por defecto \"Backup Importado (fecha)\").
+  /// [folderName]: nombre de la carpeta donde se agrega (por defecto "Backup Importado (fecha)").
   Future<ImportBackupReport> importBackup(String sourcePath, {bool extracted = false, String? folderName}) async {
     final extractDir = extracted ? sourcePath : p.join(await fs.tempPath(), 'import_extraction_${DateTime.now().millisecondsSinceEpoch}');
     final copiedFiles = <String>[];
@@ -283,8 +283,14 @@ class BackupManager {
       AppData.backgroundTaskProgress.value = const BackgroundTaskStatus(0.0, 'Preparando importación...');
       if (!extracted) await fs.createDir(extractDir);
 
-      // 1. Unzip en segundo plano (Evita OOM)
-      if (!extracted) await ZipTools.unzipToDir(sourcePath, extractDir, onProgress: _progress('Descomprimiendo backup...'));
+      // 1. Desde un ZIP: extraer SOLO la base. Cada PDF se extrae después
+      //    directo a su lugar final en la biblioteca (sin carpeta temporal:
+      //    se escribe una sola vez; en web eso evita gigas de escrituras).
+      List<String> zipNames = const [];
+      if (!extracted) {
+        zipNames = await ZipTools.listEntryNames(sourcePath) ?? const [];
+        await ZipTools.extractEntries(sourcePath, {kMainDbFileName: p.join(extractDir, kMainDbFileName)});
+      }
 
       // 2. Abrir y validar la DB del backup
       final dbFile = p.join(extractDir, kMainDbFileName);
@@ -310,12 +316,16 @@ class BackupManager {
         final docIdMap = <String, String>{}; // id en backup -> id nuevo
         final newRelPath = <String, String>{};
         var missingFiles = 0;
+        final toExtract = <String, String>{}; // entrada del ZIP -> destino
         for (var i = 0; i < extDocs.length; i++) {
           final d = extDocs[i];
           AppData.backgroundTaskProgress.value = BackgroundTaskStatus(
             (i + 1) / extDocs.length, 'Copiando PDFs (${i + 1}/${extDocs.length})...');
 
-          final source = await _findBackupPdf(extractDir, d.internalRelPath);
+          // Desde un directorio: ruta del PDF. Desde un ZIP: nombre de la entrada.
+          final source = extracted
+              ? await _findBackupPdf(extractDir, d.internalRelPath)
+              : _findZipEntry(zipNames, d.internalRelPath);
           if (source == null) {
             missingFiles++;
             debugPrint("Advertencia: PDF no encontrado en el backup para '${d.displayName}'");
@@ -324,11 +334,23 @@ class BackupManager {
           final newDocId = AppData.newDocId();
           final newFilename = '$newDocId.pdf';
           final dest = p.join(docsDir, newFilename);
-          // Web: mover desde el temporal de extracción (no duplica los bytes).
-          await (fs.isNative ? fs.copy(source, dest) : fs.rename(source, dest));
           copiedFiles.add(dest);
+          if (extracted) {
+            // Web: mover desde el temporal de extracción (no duplica los bytes).
+            await (fs.isNative ? fs.copy(source, dest) : fs.rename(source, dest));
+          } else {
+            toExtract[source] = dest;
+          }
           docIdMap[d.id] = newDocId;
           newRelPath[d.id] = p.join('docs', newFilename);
+        }
+
+        if (toExtract.isNotEmpty) {
+          await ZipTools.extractEntries(
+            sourcePath,
+            toExtract,
+            onProgress: _progress('Extrayendo partituras...'),
+          );
         }
 
         // 4. Escrituras de DB en una sola transacción
@@ -453,6 +475,16 @@ class BackupManager {
       AppData.backgroundTaskProgress.value = null;
       if (!extracted) { try { await fs.deleteDir(extractDir); } catch (_) {} }
     }
+  }
+
+  /// Nombre de la entrada del ZIP con el PDF de un doc (ruta guardada o
+  /// fallback a docs/<basename>), o null si no está.
+  String? _findZipEntry(List<String> names, String internalRelPath) {
+    final rel = p.posix.normalize(internalRelPath.replaceAll('\\', '/'));
+    for (final c in [rel, 'docs/${p.posix.basename(rel)}']) {
+      if (names.contains(c)) return c;
+    }
+    return null;
   }
 
   /// Busca el PDF de un doc dentro del backup extraído (ruta guardada o
