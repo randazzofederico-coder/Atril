@@ -14,6 +14,7 @@ import '../data/file_receiver_channel.dart';
 import '../data/folder_share_manager.dart';
 import 'library/folder_picker_screen.dart';
 import '../platform/busy_indicator.dart';
+import '../widgets/background_task_bar.dart';
 import '../platform/zip/zip_tools.dart';
 
 class HomeShell extends StatefulWidget {
@@ -253,62 +254,8 @@ class _HomeShellState extends State<HomeShell> {
       bottomNavigationBar: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Global Progress
-          ValueListenableBuilder<BackgroundTaskStatus?>(
-            valueListenable: AppData.backgroundTaskProgress,
-            builder: (context, status, _) {
-               if (status == null) return const SizedBox.shrink();
-               return Column(
-                 mainAxisSize: MainAxisSize.min,
-                 crossAxisAlignment: CrossAxisAlignment.stretch,
-                 children: [
-                   LinearProgressIndicator(value: status.indeterminate ? null : status.progress, minHeight: 4),
-                   Container(
-                     color: Theme.of(context).colorScheme.surfaceContainer,
-                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                     child: Row(
-                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                       children: [
-                         Expanded(
-                           child: Text(
-                             status.message,
-                             style: Theme.of(context).textTheme.bodySmall,
-                             maxLines: 2,
-                             overflow: TextOverflow.ellipsis,
-                           ),
-                         ),
-                         if (!status.indeterminate)
-                           Text(
-                             status.percentage,
-                             style: Theme.of(context).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.bold),
-                           ),
-                         if (status.onCancel != null)
-                           TextButton(onPressed: status.onCancel, child: const Text('Cancelar')),
-                       ],
-                     ),
-                   ),
-                   if (status.itemLabel != null)
-                     Container(
-                       color: Theme.of(context).colorScheme.surfaceContainer,
-                       padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
-                       child: Column(
-                         crossAxisAlignment: CrossAxisAlignment.start,
-                         children: [
-                           Text(
-                             status.itemLabel!,
-                             style: Theme.of(context).textTheme.labelSmall,
-                             maxLines: 1,
-                             overflow: TextOverflow.ellipsis,
-                           ),
-                           const SizedBox(height: 3),
-                           LinearProgressIndicator(value: status.itemProgress, minHeight: 2),
-                         ],
-                       ),
-                     ),
-                 ],
-               );
-            },
-          ),
+          // Progreso global (misma barra en toda la app)
+          const BackgroundTaskBar(),
           NavigationBar(
             selectedIndex: _index,
             onDestinationSelected: (i) => setState(() => _index = i),

@@ -9,6 +9,7 @@ import '../../platform/picked_files.dart';
 import '../../platform/pwa/pwa_install_service.dart';
 import '../../data/app_data.dart';
 import '../trash/trash_bin_screen.dart';
+import '../../widgets/background_task_bar.dart';
 import 'diag_log_screen.dart';
 import 'drive_backup_screen.dart';
 import '../library/export_actions.dart';
@@ -135,10 +136,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
         return Scaffold(
         appBar: AppBar(title: const Text('Configuración')),
         // Las tareas largas (backup, exportar...) no bloquean Ajustes: el
-        // progreso se muestra arriba y solo se desactiva la sección Datos.
+        // progreso va en la barra inferior de siempre y solo se desactiva la
+        // sección Datos.
+        bottomNavigationBar: const SafeArea(top: false, child: BackgroundTaskBar()),
         body: Column(
           children: [
-            if (isBusy) _buildBusyBanner(taskStatus),
             Expanded(
               child: ListView(
               children: [
@@ -250,32 +252,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
       );
       } 
-    );
-  }
-
-  Widget _buildBusyBanner(BackgroundTaskStatus? status) {
-    return Material(
-      color: Theme.of(context).colorScheme.surfaceContainerHighest,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          LinearProgressIndicator(
-            value: status == null || status.indeterminate ? null : status.progress,
-            minHeight: 3,
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            child: Text(
-              status == null
-                  ? 'Trabajando...'
-                  : status.indeterminate
-                      ? status.message
-                      : '${status.message}  ${status.percentage}',
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-          ),
-        ],
-      ),
     );
   }
 
