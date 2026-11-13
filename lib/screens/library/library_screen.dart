@@ -3,7 +3,6 @@ import '../../data/app_data.dart';
 import '../../widgets/library_browser_selector.dart';
 import '../../widgets/library_breadcrumbs.dart';
 import '../../widgets/folder_creation_dialog.dart';
-import '../../widgets/import_status_bar.dart'; 
 import '../reader/pdf_viewer_screen.dart';
 import '../../widgets/scoped_search_delegate.dart';
 import '../settings/settings_screen.dart';
@@ -274,7 +273,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
         appBar: appBar,
         body: Column(
           children: [
-            const ImportStatusBar(),
             Expanded(
               child: LibraryBrowserSelector(
                 currentFolderId: _currentFolderId,

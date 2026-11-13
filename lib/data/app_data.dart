@@ -519,8 +519,14 @@ class AppData {
 class BackgroundTaskStatus {
   final double progress; // 0.0 - 1.0
   final String message;
-  
-  const BackgroundTaskStatus(this.progress, this.message);
+
+  /// Sin avance conocido (p. ej. esperando a Google Drive): barra animada.
+  final bool indeterminate;
+
+  /// Si no es null, la barra muestra "Cancelar".
+  final VoidCallback? onCancel;
+
+  const BackgroundTaskStatus(this.progress, this.message, {this.indeterminate = false, this.onCancel});
   
   String get percentage => '${(progress * 100).toInt()}%';
 }

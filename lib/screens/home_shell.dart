@@ -251,21 +251,28 @@ class _HomeShellState extends State<HomeShell> {
                  mainAxisSize: MainAxisSize.min,
                  crossAxisAlignment: CrossAxisAlignment.stretch,
                  children: [
-                   LinearProgressIndicator(value: status.progress, minHeight: 4),
+                   LinearProgressIndicator(value: status.indeterminate ? null : status.progress, minHeight: 4),
                    Container(
                      color: Theme.of(context).colorScheme.surfaceContainer,
                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                      child: Row(
                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
                        children: [
-                         Text(
-                           status.message,
-                           style: Theme.of(context).textTheme.bodySmall,
+                         Expanded(
+                           child: Text(
+                             status.message,
+                             style: Theme.of(context).textTheme.bodySmall,
+                             maxLines: 2,
+                             overflow: TextOverflow.ellipsis,
+                           ),
                          ),
-                         Text(
-                           status.percentage,
-                           style: Theme.of(context).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.bold),
-                         ),
+                         if (!status.indeterminate)
+                           Text(
+                             status.percentage,
+                             style: Theme.of(context).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.bold),
+                           ),
+                         if (status.onCancel != null)
+                           TextButton(onPressed: status.onCancel, child: const Text('Cancelar')),
                        ],
                      ),
                    ),

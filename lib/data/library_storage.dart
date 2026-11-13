@@ -85,9 +85,15 @@ class LibraryStorage {
     await fs.deleteFile(tmpPath);
 
     try {
-      // La implementación nativa ya reintenta con streams si la copia
-      // directa falla (Scoped Storage).
-      await fs.copy(sourcePath, tmpPath);
+      if (!fs.isNative && p.basename(p.dirname(sourcePath)).startsWith('atril_pick_')) {
+        // Web: archivo elegido ya copiado a un temporal propio. Moverlo es
+        // mucho más liviano que copiarlo (no pasa los bytes por Dart).
+        await fs.rename(sourcePath, tmpPath);
+      } else {
+        // La implementación nativa ya reintenta con streams si la copia
+        // directa falla (Scoped Storage).
+        await fs.copy(sourcePath, tmpPath);
+      }
     } catch (e) {
       debugPrint('Error: no se pudo copiar el PDF importado: $e');
       // Limpiamos si quedó algo corrupto

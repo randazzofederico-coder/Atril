@@ -21,16 +21,15 @@ void cancelPick() => cancelPendingPick();
 /// canceló).
 /// - [onWaiting] (solo web): el usuario volvió del selector y el navegador
 ///   todavía está bajando los archivos (Drive). No hay avance disponible.
-/// - [onChosen]: llegaron [count] archivos.
-/// - [onPrepared]: se guardó el archivo i de n.
+/// - [onPreparing] (solo web): avance real (0..1) de la lectura y guardado
+///   de los archivos ya entregados, con un mensaje para mostrar.
 ///
 /// En web usa un selector propio con `accept` explícito: sin él, Android
 /// ofrece solo cámara y fotos.
 Future<List<String>> pickFilesToFs(
   PickKind kind, {
   void Function()? onWaiting,
-  void Function(int count)? onChosen,
-  void Function(int done, int total)? onPrepared,
+  void Function(String message, double progress)? onPreparing,
 }) async {
   final multiple = kind == PickKind.pdfs;
   if (!fs.isNative) {
@@ -38,16 +37,20 @@ Future<List<String>> pickFilesToFs(
         ? '.pdf,application/pdf'
         : '.atril,.setlist,.atrilfolder,.zip,application/zip,'
             'application/x-zip-compressed,application/octet-stream';
-    final picked = await pickFilesWeb(
-      accept: accept,
-      multiple: multiple,
-      onWaiting: onWaiting,
-      onChosen: onChosen,
-    );
+    final picked = await pickFilesWeb(accept: accept, multiple: multiple, onWaiting: onWaiting);
+    final totalBytes = picked.fold<int>(0, (a, f) => a + f.size);
+    var doneBytes = 0;
     final out = <String>[];
-    for (final (name, bytes) in picked) {
-      out.add(await _writeTemp(name, bytes));
-      onPrepared?.call(out.length, picked.length);
+    for (var i = 0; i < picked.length; i++) {
+      final f = picked[i];
+      final label = picked.length > 1 ? 'Preparando ${i + 1}/${picked.length}: ${f.name}' : 'Preparando ${f.name}';
+      final sizeLabel = ' (${_mb(f.size)})';
+      double overall(int read) => totalBytes == 0 ? 1 : (doneBytes + read) / totalBytes;
+      onPreparing?.call('$label$sizeLabel', overall(0));
+      final bytes = await f.read(onBytes: (read) => onPreparing?.call('$label$sizeLabel', overall(read)));
+      onPreparing?.call('Guardando ${f.name}...', overall(f.size));
+      out.add(await _writeTemp(f.name, bytes));
+      doneBytes += f.size;
     }
     return out;
   }
@@ -59,9 +62,12 @@ Future<List<String>> pickFilesToFs(
         )
       : await FilePicker.platform.pickFiles(type: FileType.any);
   if (result == null) return const [];
-  onChosen?.call(result.files.length);
   return [for (final f in result.files) if (f.path != null) f.path!];
 }
+
+String _mb(int bytes) => bytes < 1024 * 1024
+    ? '${(bytes / 1024).toStringAsFixed(0)} KB'
+    : '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
 
 Future<String> _writeTemp(String name, List<int> bytes) async {
   final path = p.join(

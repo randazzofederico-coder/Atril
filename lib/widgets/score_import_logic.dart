@@ -16,14 +16,23 @@ class ScoreImportLogic {
       //    sistema/navegador puede tardar en bajar archivos de Drive.
       final validPaths = await pickFilesToFs(
         PickKind.pdfs,
-        onWaiting: () => AppData.importState.value = const ImportState(stage: ImportStage.waiting),
-        onChosen: (n) => AppData.importState.value = ImportState(stage: ImportStage.picking, total: n),
-        onPrepared: (i, n) => AppData.importState.value = ImportState(stage: ImportStage.picking, total: n, current: i),
+        // Todo el proceso se muestra en la barra de progreso inferior.
+        onWaiting: () => AppData.backgroundTaskProgress.value = BackgroundTaskStatus(
+          0,
+          'Esperando a Google Drive… los archivos grandes pueden tardar',
+          indeterminate: true,
+          onCancel: () {
+            cancelPick();
+            AppData.backgroundTaskProgress.value = null;
+          },
+        ),
+        onPreparing: (msg, progress) =>
+            AppData.backgroundTaskProgress.value = BackgroundTaskStatus(progress, msg),
       );
 
       // Si el usuario cancela, volvemos a IDLE
       if (validPaths.isEmpty) {
-        AppData.importState.value = const ImportState(stage: ImportStage.idle);
+        AppData.backgroundTaskProgress.value = null;
         return;
       }
 

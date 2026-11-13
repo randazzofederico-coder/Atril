@@ -1,12 +1,10 @@
-import 'dart:typed_data';
+import 'picked_file.dart';
 
 /// Solo existe en web (ver web_file_picker_web.dart).
-Future<List<(String, Uint8List)>> pickFilesWeb({
+Future<List<PickedFile>> pickFilesWeb({
   required String accept,
   bool multiple = false,
   void Function()? onWaiting,
-  void Function(int count)? onChosen,
-  void Function(int done, int total)? onRead,
 }) =>
     throw UnsupportedError('pickFilesWeb solo está disponible en web');
 
