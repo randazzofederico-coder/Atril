@@ -122,7 +122,11 @@ class ImportRepository {
           name: fileName,
         );
         // Global UI
-        AppData.backgroundTaskProgress.value = BackgroundTaskStatus(current / total, 'Importando $fileName');
+        AppData.backgroundTaskProgress.value = BackgroundTaskStatus(
+          current / total,
+          total > 1 ? 'Importando archivo ${current + 1} de $total' : 'Importando archivo',
+          itemLabel: fileName,
+        );
 
         await importPdfFromExternalPath(
           sourcePath: path,

@@ -1,0 +1,1 @@
+void setWebBusy(bool busy) {}

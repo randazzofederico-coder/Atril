@@ -22,14 +22,14 @@ void cancelPick() => cancelPendingPick();
 /// - [onWaiting] (solo web): el usuario volvió del selector y el navegador
 ///   todavía está bajando los archivos (Drive). No hay avance disponible.
 /// - [onPreparing] (solo web): avance real (0..1) de la lectura y guardado
-///   de los archivos ya entregados, con un mensaje para mostrar.
+///   de los archivos ya entregados: general + del archivo en curso.
 ///
 /// En web usa un selector propio con `accept` explícito: sin él, Android
 /// ofrece solo cámara y fotos.
 Future<List<String>> pickFilesToFs(
   PickKind kind, {
   void Function()? onWaiting,
-  void Function(String message, double progress)? onPreparing,
+  void Function(String message, double progress, String itemLabel, double itemProgress)? onPreparing,
 }) async {
   final multiple = kind == PickKind.pdfs;
   if (!fs.isNative) {
@@ -43,12 +43,15 @@ Future<List<String>> pickFilesToFs(
     final out = <String>[];
     for (var i = 0; i < picked.length; i++) {
       final f = picked[i];
-      final label = picked.length > 1 ? 'Preparando ${i + 1}/${picked.length}: ${f.name}' : 'Preparando ${f.name}';
-      final sizeLabel = ' (${_mb(f.size)})';
+      final msg = picked.length > 1 ? 'Preparando archivo ${i + 1} de ${picked.length}' : 'Preparando archivo';
       double overall(int read) => totalBytes == 0 ? 1 : (doneBytes + read) / totalBytes;
-      onPreparing?.call('$label$sizeLabel', overall(0));
-      final bytes = await f.read(onBytes: (read) => onPreparing?.call('$label$sizeLabel', overall(read)));
-      onPreparing?.call('Guardando ${f.name}...', overall(f.size));
+      String item(int read) => '${f.name} · ${_mb(read)} / ${_mb(f.size)}';
+      double itemFrac(int read) => f.size == 0 ? 1 : read / f.size;
+      onPreparing?.call(msg, overall(0), item(0), 0);
+      final bytes = await f.read(onBytes: (read) => onPreparing?.call(msg, overall(read), item(read), itemFrac(read)));
+      onPreparing?.call(msg, overall(f.size), 'Guardando ${f.name}...', 1);
+      // Un frame para que se vea "Guardando" antes de la copia pesada.
+      await Future<void>.delayed(const Duration(milliseconds: 16));
       out.add(await _writeTemp(f.name, bytes));
       doneBytes += f.size;
     }

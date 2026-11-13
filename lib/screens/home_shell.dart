@@ -13,6 +13,7 @@ import '../data/db/db_connection.dart' show kMainDbFileName;
 import '../data/file_receiver_channel.dart';
 import '../data/folder_share_manager.dart';
 import 'library/folder_picker_screen.dart';
+import '../platform/busy_indicator.dart';
 import '../platform/zip/zip_tools.dart';
 
 class HomeShell extends StatefulWidget {
@@ -32,11 +33,21 @@ class _HomeShellState extends State<HomeShell> {
     _setupFileReceiver();
     // Backup en Drive (si está activado). HomeShell se muestra con AppData listo.
     DriveBackupService.instance.init();
+    // Web: indicador CSS que no se congela mientras haya una tarea en curso.
+    AppData.backgroundTaskProgress.addListener(_syncWebBusy);
   }
 
   // ---------------------------------------------------------------------------
   // RECEPCIÓN DE ARCHIVOS EXTERNOS (.setlist, .atril)
   // ---------------------------------------------------------------------------
+
+  void _syncWebBusy() => setWebBusy(AppData.backgroundTaskProgress.value != null);
+
+  @override
+  void dispose() {
+    AppData.backgroundTaskProgress.removeListener(_syncWebBusy);
+    super.dispose();
+  }
 
   void _setupFileReceiver() {
     FileReceiverChannel.onFileReceived = _handleIncomingFile;
@@ -276,6 +287,24 @@ class _HomeShellState extends State<HomeShell> {
                        ],
                      ),
                    ),
+                   if (status.itemLabel != null)
+                     Container(
+                       color: Theme.of(context).colorScheme.surfaceContainer,
+                       padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
+                       child: Column(
+                         crossAxisAlignment: CrossAxisAlignment.start,
+                         children: [
+                           Text(
+                             status.itemLabel!,
+                             style: Theme.of(context).textTheme.labelSmall,
+                             maxLines: 1,
+                             overflow: TextOverflow.ellipsis,
+                           ),
+                           const SizedBox(height: 3),
+                           LinearProgressIndicator(value: status.itemProgress, minHeight: 2),
+                         ],
+                       ),
+                     ),
                  ],
                );
             },

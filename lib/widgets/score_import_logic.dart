@@ -26,8 +26,8 @@ class ScoreImportLogic {
             AppData.backgroundTaskProgress.value = null;
           },
         ),
-        onPreparing: (msg, progress) =>
-            AppData.backgroundTaskProgress.value = BackgroundTaskStatus(progress, msg),
+        onPreparing: (msg, progress, item, itemProgress) => AppData.backgroundTaskProgress.value =
+            BackgroundTaskStatus(progress, msg, itemLabel: item, itemProgress: itemProgress),
       );
 
       // Si el usuario cancela, volvemos a IDLE

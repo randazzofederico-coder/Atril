@@ -526,7 +526,19 @@ class BackgroundTaskStatus {
   /// Si no es null, la barra muestra "Cancelar".
   final VoidCallback? onCancel;
 
-  const BackgroundTaskStatus(this.progress, this.message, {this.indeterminate = false, this.onCancel});
+  /// Segunda barra (opcional): el archivo en curso. [itemProgress] null con
+  /// [itemLabel] presente = barra animada sin porcentaje.
+  final String? itemLabel;
+  final double? itemProgress;
+
+  const BackgroundTaskStatus(
+    this.progress,
+    this.message, {
+    this.indeterminate = false,
+    this.onCancel,
+    this.itemLabel,
+    this.itemProgress,
+  });
   
   String get percentage => '${(progress * 100).toInt()}%';
 }
