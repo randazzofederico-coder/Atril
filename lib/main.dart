@@ -5,10 +5,12 @@ import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
 import 'screens/home_shell.dart';
 import 'data/app_data.dart';
+import 'platform/diag_log.dart';
 import 'platform/pwa/pwa_install_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  DiagLog.install(); // Ajustes → Acerca de → Registro de diagnóstico
 
   // Initialize Firebase (same pattern as Metrónomo & Afinador)
   await Firebase.initializeApp(

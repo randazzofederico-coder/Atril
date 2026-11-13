@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:intl/intl.dart';
 import 'package:path/path.dart' as p;
 
+import '../platform/diag_log.dart';
 import '../platform/fs/atril_fs.dart';
 import '../platform/share_files.dart';
 import '../platform/zip/zip_tools.dart';
@@ -35,6 +36,7 @@ class BackupManager {
       // 1. Snapshot consistente de la DB
       dbSnapshot = p.join(tempDir, 'atril_backup_${DateTime.now().millisecondsSinceEpoch}.sqlite');
       await fs.deleteFile(dbSnapshot);
+      diag('backup: snapshot de la base');
       await snapshotDatabaseTo(AppData.db, dbSnapshot);
       if (!await fs.fileExists(dbSnapshot)) throw Exception("No se pudo copiar la base de datos.");
 
@@ -67,7 +69,9 @@ class BackupManager {
       AppData.backgroundTaskProgress.value = null;
 
       // 6. Exportar
+      diag('backup: compartir $fileName');
       await shareFiles([ShareFile(zipFilePath)], text: 'Backup de Atril Digital');
+      diag('backup: compartir terminó');
 
     } catch (e) {
       debugPrint('Error creando backup: $e');

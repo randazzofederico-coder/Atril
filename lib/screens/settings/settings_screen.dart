@@ -9,6 +9,7 @@ import '../../platform/picked_files.dart';
 import '../../platform/pwa/pwa_install_service.dart';
 import '../../data/app_data.dart';
 import '../trash/trash_bin_screen.dart';
+import 'diag_log_screen.dart';
 import 'drive_backup_screen.dart';
 import '../library/export_actions.dart';
 
@@ -200,6 +201,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 const Divider(),
 
                 _buildSectionHeader('Acerca de'),
+
+                ListTile(
+
+                  leading: const Icon(Icons.bug_report_outlined),
+
+                  title: const Text('Registro de diagnóstico'),
+
+                  subtitle: const Text('Para enviar si algo no funciona bien'),
+
+                  onTap: () => Navigator.push(
+
+                    context,
+
+                    MaterialPageRoute(builder: (_) => const DiagLogScreen()),
+
+                  ),
+
+                ),
                 ListTile(
                   leading: const Icon(Icons.info_outline),
                   title: const Text('Atril Digital'),

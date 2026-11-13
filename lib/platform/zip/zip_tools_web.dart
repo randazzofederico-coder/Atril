@@ -1,18 +1,32 @@
+import 'dart:js_interop';
+import 'dart:typed_data';
+
 import 'package:archive/archive.dart';
 import 'package:path/path.dart' as p;
+import 'package:web/web.dart' as web;
 
+import '../diag_log.dart';
 import '../fs/atril_fs.dart';
+import '../web_blobs.dart';
 import 'zip_tools.dart';
 
-// Web: sin isolates ni dart:io. Todo en memoria sobre AtrilFs, cediendo el
-// hilo entre archivos para que la UI muestre el progreso.
+// Web: sin isolates ni dart:io.
+// - Comprimir: el ZIP se escribe por partes directo a un Blob del navegador
+//   (registrado en [webBlobs] con la ruta de salida), sin pasar por
+//   IndexedDB ni tener el ZIP entero en memoria de Dart. Los PDFs van
+//   "almacenados" (sin deflate): casi no se comprimen y deflate en el hilo
+//   principal trababa la app.
+// - Descomprimir: en memoria sobre AtrilFs.
 
 Future<void> zipToFile(
   String outputPath,
   List<ZipEntrySpec> entries, {
   void Function(double progress)? onProgress,
 }) async {
-  final archive = Archive();
+  final sw = Stopwatch()..start();
+  diag('zip: inicio, ${entries.length} entradas -> $outputPath');
+  final out = _BlobOutput();
+  final encoder = ZipEncoder()..startEncode(out, level: Deflate.NO_COMPRESSION);
   var count = 0;
   for (final entry in entries) {
     List<int>? bytes = entry.bytes;
@@ -20,15 +34,23 @@ Future<void> zipToFile(
       bytes = await fs.readBytes(entry.sourcePath!);
     }
     if (bytes != null) {
-      archive.addFile(ArchiveFile(entry.zipPath, bytes.length, bytes));
+      final isPdf = entry.zipPath.toLowerCase().endsWith('.pdf');
+      encoder.addFile(isPdf
+          ? ArchiveFile.noCompress(entry.zipPath, bytes.length, bytes)
+          : ArchiveFile(entry.zipPath, bytes.length, bytes));
+      diag('zip: ${entry.zipPath} (${(bytes.length / 1048576).toStringAsFixed(1)} MB) '
+          'en ${sw.elapsedMilliseconds} ms');
     }
     count++;
     onProgress?.call(entries.isEmpty ? 1.0 : count / entries.length);
+    // Ceder el hilo para que se vea el avance.
     await Future<void>.delayed(Duration.zero);
   }
-  final zipped = ZipEncoder().encode(archive);
-  if (zipped == null) throw Exception('No se pudo generar el ZIP.');
-  await fs.writeBytes(outputPath, zipped);
+  encoder.endEncode();
+  out.flush();
+  final blob = web.Blob(out.parts.toJS, web.BlobPropertyBag(type: 'application/zip'));
+  webBlobs[outputPath] = blob;
+  diag('zip: listo, ${(blob.size / 1048576).toStringAsFixed(1)} MB en ${sw.elapsedMilliseconds} ms');
 }
 
 Future<List<String>?> listEntryNames(String zipPath) async {
@@ -61,5 +83,70 @@ Future<void> unzipToDir(
       onProgress?.call(count / total);
       await Future<void>.delayed(Duration.zero);
     }
+  }
+}
+
+/// Salida del encoder que va pasando bloques de ~4 MB al lado JS (partes del
+/// Blob) para no acumular el ZIP entero en memoria de Dart.
+class _BlobOutput extends OutputStreamBase {
+  static const _chunk = 4 * 1024 * 1024;
+  final List<JSUint8Array> parts = [];
+  final Uint8List _buf = Uint8List(_chunk);
+  int _pos = 0;
+  int _length = 0;
+
+  @override
+  int get length => _length;
+
+  @override
+  void flush() {
+    if (_pos == 0) return;
+    parts.add(Uint8List.fromList(Uint8List.sublistView(_buf, 0, _pos)).toJS);
+    _pos = 0;
+  }
+
+  @override
+  void writeByte(int value) {
+    if (_pos == _chunk) flush();
+    _buf[_pos++] = value & 0xff;
+    _length++;
+  }
+
+  @override
+  void writeBytes(List<int> bytes, [int? len]) {
+    len ??= bytes.length;
+    if (len >= _chunk) {
+      flush();
+      final view = bytes is Uint8List ? Uint8List.sublistView(bytes, 0, len) : Uint8List.fromList(bytes.sublist(0, len));
+      // Bloque grande (un PDF): directo como parte propia.
+      parts.add(view.toJS);
+      _length += len;
+      return;
+    }
+    if (_pos + len > _chunk) flush();
+    _buf.setRange(_pos, _pos + len, bytes);
+    _pos += len;
+    _length += len;
+  }
+
+  @override
+  void writeInputStream(InputStreamBase stream) => writeBytes(stream.toUint8List());
+
+  @override
+  void writeUint16(int value) {
+    writeByte(value & 0xff);
+    writeByte((value >> 8) & 0xff);
+  }
+
+  @override
+  void writeUint32(int value) {
+    writeUint16(value & 0xffff);
+    writeUint16((value >> 16) & 0xffff);
+  }
+
+  @override
+  void writeUint64(int value) {
+    writeUint32(value & 0xffffffff);
+    writeUint32((value >> 32) & 0xffffffff);
   }
 }
