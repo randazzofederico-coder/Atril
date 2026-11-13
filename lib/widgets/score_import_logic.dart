@@ -16,7 +16,9 @@ class ScoreImportLogic {
       //    sistema/navegador puede tardar en bajar archivos de Drive.
       final validPaths = await pickFilesToFs(
         PickKind.pdfs,
-        onChosen: () => AppData.importState.value = const ImportState(stage: ImportStage.picking),
+        onWaiting: () => AppData.importState.value = const ImportState(stage: ImportStage.waiting),
+        onChosen: (n) => AppData.importState.value = ImportState(stage: ImportStage.picking, total: n),
+        onPrepared: (i, n) => AppData.importState.value = ImportState(stage: ImportStage.picking, total: n, current: i),
       );
 
       // Si el usuario cancela, volvemos a IDLE
@@ -48,7 +50,7 @@ class ScoreImportLogic {
     if (kIsWeb) {
       // El navegador no da acceso a carpetas: se eligen varios PDFs.
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('En la versión web elegí los PDFs con \"Importar archivos\" (podés seleccionar varios).'),
+        content: Text('En la versión web no se pueden importar carpetas: usá \"Importar archivos\" (podés elegir varios a la vez).'),
       ));
       return;
     }

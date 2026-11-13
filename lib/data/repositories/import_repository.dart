@@ -10,7 +10,9 @@ import '../app_data.dart';
 // --- CLASES Y ENUMS ---
 
 /// Define las fases de la importación para la UI
-enum ImportStage { idle, picking, processing, finishing }
+/// [waiting]: esperando que el navegador entregue los archivos (Drive).
+/// [picking]: preparando los archivos elegidos (current/total).
+enum ImportStage { idle, waiting, picking, processing, finishing }
 
 /// Estado para notificar a la barra de progreso
 class ImportState {

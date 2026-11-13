@@ -14,23 +14,40 @@ enum PickKind {
   atrilFile,
 }
 
+/// Abandona una selección web que está esperando a Drive.
+void cancelPick() => cancelPendingPick();
+
 /// Abre el selector de archivos y devuelve rutas de [AtrilFs] (lista vacía si
-/// canceló). [onChosen] se llama cuando el usuario ya eligió y empieza la
-/// lectura/descarga (útil para mostrar "Descargando...").
+/// canceló).
+/// - [onWaiting] (solo web): el usuario volvió del selector y el navegador
+///   todavía está bajando los archivos (Drive). No hay avance disponible.
+/// - [onChosen]: llegaron [count] archivos.
+/// - [onPrepared]: se guardó el archivo i de n.
 ///
 /// En web usa un selector propio con `accept` explícito: sin él, Android
 /// ofrece solo cámara y fotos.
-Future<List<String>> pickFilesToFs(PickKind kind, {void Function()? onChosen}) async {
+Future<List<String>> pickFilesToFs(
+  PickKind kind, {
+  void Function()? onWaiting,
+  void Function(int count)? onChosen,
+  void Function(int done, int total)? onPrepared,
+}) async {
   final multiple = kind == PickKind.pdfs;
   if (!fs.isNative) {
     final accept = kind == PickKind.pdfs
         ? '.pdf,application/pdf'
         : '.atril,.setlist,.atrilfolder,.zip,application/zip,'
             'application/x-zip-compressed,application/octet-stream';
-    final picked = await pickFilesWeb(accept: accept, multiple: multiple, onChosen: onChosen);
+    final picked = await pickFilesWeb(
+      accept: accept,
+      multiple: multiple,
+      onWaiting: onWaiting,
+      onChosen: onChosen,
+    );
     final out = <String>[];
     for (final (name, bytes) in picked) {
       out.add(await _writeTemp(name, bytes));
+      onPrepared?.call(out.length, picked.length);
     }
     return out;
   }
@@ -42,7 +59,7 @@ Future<List<String>> pickFilesToFs(PickKind kind, {void Function()? onChosen}) a
         )
       : await FilePicker.platform.pickFiles(type: FileType.any);
   if (result == null) return const [];
-  onChosen?.call();
+  onChosen?.call(result.files.length);
   return [for (final f in result.files) if (f.path != null) f.path!];
 }
 

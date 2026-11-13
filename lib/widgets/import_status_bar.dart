@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../data/app_data.dart';
+import '../platform/picked_files.dart' show cancelPick;
 
 class ImportStatusBar extends StatelessWidget {
   const ImportStatusBar({super.key});
@@ -33,7 +34,9 @@ class ImportStatusBar extends StatelessWidget {
               // Si está en 'picking' (descargando de Drive) es indeterminada (se mueve sola)
               // Si está en 'processing' (importando) muestra el avance real
               LinearProgressIndicator(
-                value: state.stage == ImportStage.processing ? state.progress : null,
+                value: state.stage == ImportStage.processing
+                    ? state.progress
+                    : (state.stage == ImportStage.picking && state.total > 0 ? state.current / state.total : null),
                 minHeight: 4,
                 backgroundColor: Colors.transparent,
               ),
@@ -43,7 +46,7 @@ class ImportStatusBar extends StatelessWidget {
                 child: Row(
                   children: [
                     // Icono
-                    if (state.stage == ImportStage.picking)
+                    if (state.stage == ImportStage.picking || state.stage == ImportStage.waiting)
                        const SizedBox(
                          width: 12, height: 12, 
                          child: CircularProgressIndicator(strokeWidth: 2)
@@ -64,10 +67,21 @@ class ImportStatusBar extends StatelessWidget {
                     ),
                     
                     // Contador (ej: 3 / 10)
-                    if (state.stage == ImportStage.processing)
+                    if (state.stage == ImportStage.processing ||
+                        (state.stage == ImportStage.picking && state.total > 1))
                       Text(
                         '${state.current} / ${state.total}',
                         style: const TextStyle(fontSize: 12, color: Colors.grey),
+                      ),
+
+                    // Esperando a Drive: se puede abandonar
+                    if (state.stage == ImportStage.waiting)
+                      TextButton(
+                        onPressed: () {
+                          cancelPick();
+                          AppData.importState.value = const ImportState();
+                        },
+                        child: const Text('Cancelar'),
                       ),
                   ],
                 ),
@@ -81,8 +95,12 @@ class ImportStatusBar extends StatelessWidget {
 
   String _getStatusText(ImportState state) {
     switch (state.stage) {
+      case ImportStage.waiting:
+        // Chrome baja los archivos de Drive antes de entregarlos y no informa
+        // el avance: solo podemos avisar que estamos esperando.
+        return 'Esperando a Google Drive… los archivos grandes pueden tardar';
       case ImportStage.picking:
-        return 'Descargando archivos...'; // Esto aparece durante la espera de Drive
+        return 'Preparando archivos...';
       case ImportStage.processing:
         return 'Importando: ${state.currentItemName}';
       case ImportStage.finishing:

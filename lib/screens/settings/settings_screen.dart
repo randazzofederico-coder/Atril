@@ -81,7 +81,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     if (confirm != true) return;
 
-    final paths = await pickFilesToFs(PickKind.atrilFile);
+    final paths = await pickFilesToFs(PickKind.atrilFile, onWaiting: _showWaitingDrive);
+
+    if (mounted) ScaffoldMessenger.of(context).hideCurrentSnackBar();
     if (paths.isEmpty) return;
     
     if (!mounted) return;
@@ -250,13 +252,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  /// El navegador todavía baja el archivo elegido (Drive): avisar.
+  void _showWaitingDrive() {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      duration: const Duration(minutes: 5),
+      content: const Text('Esperando a Google Drive… los archivos grandes pueden tardar'),
+      action: SnackBarAction(label: 'Cancelar', onPressed: cancelPick),
+    ));
+  }
+
   /// Abre un .atrilfolder/.setlist/.atril elegido a mano (en web es la única
   /// forma de recibirlos). Lo procesa HomeShell, igual que si llegara desde
   /// otra app.
   Future<void> _openAtrilFile() async {
     final handler = FileReceiverChannel.onFileReceived;
     if (handler == null) return;
-    final paths = await pickFilesToFs(PickKind.atrilFile);
+    final paths = await pickFilesToFs(PickKind.atrilFile, onWaiting: _showWaitingDrive);
+    if (mounted) ScaffoldMessenger.of(context).hideCurrentSnackBar();
     if (paths.isEmpty || !mounted) return;
     Navigator.pop(context); // volver a la biblioteca: ahí se ve el resultado
     handler(paths.single);
@@ -428,7 +441,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _doImport() async {
-    final paths = await pickFilesToFs(PickKind.atrilFile);
+    final paths = await pickFilesToFs(PickKind.atrilFile, onWaiting: _showWaitingDrive);
+    if (mounted) ScaffoldMessenger.of(context).hideCurrentSnackBar();
     if (paths.isEmpty) return;
     
     if (!mounted) return;
