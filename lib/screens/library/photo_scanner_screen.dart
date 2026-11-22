@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:fede_apps_core/fede_apps_core.dart' show UsageReporter;
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
@@ -322,6 +325,8 @@ class _PhotoScannerScreenState extends State<PhotoScannerScreen> {
         desiredTitle: title,
         targetFolderId: targetFolderId,
       );
+
+      unawaited(UsageReporter.instance.trackEvent('scan-pdf'));
 
       // 4. Cleanup temp file
       try { await fs.deleteFile(tempPath); } catch (_) {}

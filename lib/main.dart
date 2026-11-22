@@ -31,6 +31,14 @@ void main() async {
   } catch (e) {
     debugPrint('FedeAccount.init falló: $e');
   }
+  try {
+    UsageReporter.instance.configure(
+      app: FedeApp.atril,
+      appVersion: '2.0.0+12',
+    );
+  } catch (e) {
+    debugPrint('UsageReporter.configure falló: $e');
+  }
 
   PwaInstallService().initialize(); // no-op fuera de web
 

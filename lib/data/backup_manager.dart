@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:drift/drift.dart' show Value;
+import 'package:fede_apps_core/fede_apps_core.dart' show UsageReporter;
 import 'package:flutter/foundation.dart';
 import 'package:intl/intl.dart';
 import 'package:path/path.dart' as p;
@@ -71,6 +72,7 @@ class BackupManager {
       // 6. Exportar
       diag('backup: compartir $fileName');
       await shareFiles([ShareFile(zipFilePath)], text: 'Backup de Atril Digital');
+      unawaited(UsageReporter.instance.trackEvent('backup-export'));
       diag('backup: compartir terminó');
 
     } catch (e) {
