@@ -28,9 +28,10 @@
 
 ### 👤 Cuenta (opcional)
 - **Sin login obligatorio**: la app abre directo en la biblioteca y funciona 100% offline.
-- **Cuenta del ecosistema** (`fede_apps_core`): "Continuar con Google" desde Ajustes (Android/iOS/web); misma cuenta que Afinador, Metrónomo y Tone Generator.
+- **Cuenta del ecosistema** (`fede_apps_core` v0.7.0): "Continuar con Google" desde Ajustes (Android/iOS/web); misma cuenta que Afinador, Metrónomo, Tone Generator y Elongación Musical.
 - **Más apps**: acceso a las otras apps del ecosistema desde Ajustes.
-- Métricas de uso **solo locales** (no se envían a ningún servidor).
+- **Analítica híbrida** (`UsageTracker` + `UsageReporter`): métricas locales en el dispositivo, hits agregados sin cookies ni IDs personales a GoatCounter (`appstats.federicorandazzo.com.ar`, incluidos eventos `backup-export` / `scan-pdf`) y, si iniciás sesión, resumen de uso en Firestore (`users/{uid}/appUsage/atril`).
+- **Backup opcional en Google Drive**: respaldo unidireccional opcional en la carpeta oculta `appDataFolder` del Drive propio del usuario.
 ### 📚 Biblioteca de Partituras
 - **Carpetas anidables infinitas** con CRUD completo (crear, renombrar, mover, eliminar).
 - **Búsqueda global** por título de partitura.
@@ -193,8 +194,8 @@ lib/
 | Componente | Tecnología |
 |:---|:---|
 | **Framework** | Flutter (Dart) • Material 3 |
-| **Cuenta (opcional)** | `fede_apps_core` (Firebase Auth con Google, proyecto compartido del ecosistema) |
-| **Cloud** | Solo el perfil de la cuenta opcional (`users/{uid}`); la biblioteca no se sube |
+| **Cuenta (opcional)** | `fede_apps_core` v0.7.0 (`FedeAccount`, `UsageReporter`, `EcosystemSection`, `EcosystemPrompts`) |
+| **Cloud** | Con sesión opcional: perfil (`users/{uid}`), resumen de uso (`users/{uid}/appUsage/atril`) y backup opcional en Google Drive (`appDataFolder`) |
 | **Base de datos local** | Drift (SQLite) con migraciones tipadas |
 | **Visor PDF** | `pdfrx` (lector y Modo Vivo; un solo motor) |
 | **PDF Generation** | Syncfusion Flutter PDF |
@@ -248,10 +249,9 @@ flutter run
 
 ## 🔒 Privacidad
 
-Atril funciona sin cuenta. Si el usuario elige iniciar sesión (opcional), se usa **Firebase Auth** con Google y se guarda un perfil básico (nombre y email) en **Cloud Firestore**, compartido con las otras apps del ecosistema.
-**La biblioteca de partituras, anotaciones y configuración se almacenan localmente en el dispositivo** y nunca se sincronizan con servidores. Atril no utiliza servicios de análisis ni publicidad.
+Atril funciona sin cuenta. Si el usuario elige iniciar sesión (opcional), se usa **Firebase Auth** con Google y se guarda su perfil (`users/{uid}`) y métricas resumidas de uso (`appUsage/atril`) en **Cloud Firestore**, compartido con las otras apps del ecosistema. Si activa el backup en Drive, las copias se guardan en su propia carpeta privada `appDataFolder`. Sin login, los archivos permanecen únicamente en el dispositivo y solo se envían estadísticas agregadas anónimas (sin cookies ni identificadores personales) a GoatCounter (`appstats.federicorandazzo.com.ar`). Atril no utiliza publicidad ni vende datos.
 
-> Para más detalles, consultá [`privacy_policy.html`](privacy_policy.html).
+> Para más detalles, consultá [`privacy_policy.html`](privacy_policy.html) y [federicorandazzo.com.ar/privacidad](https://federicorandazzo.com.ar/privacidad).
 
 ---
 
