@@ -13,7 +13,7 @@
   <img src="https://img.shields.io/badge/Platform-Android%20|%20Windows%20|%20Web-green?logo=android" alt="Platform"/>
   <img src="https://img.shields.io/badge/Cuenta-opcional-FFCA28?logo=firebase" alt="Cuenta opcional"/>
   <img src="https://img.shields.io/badge/License-Private-lightgrey" alt="License"/>
-  <img src="https://img.shields.io/badge/Version-2.0.0-orange" alt="Version"/>
+  <img src="https://img.shields.io/badge/Version-2.1.0-orange" alt="Version"/>
 </p>
 
 ---
